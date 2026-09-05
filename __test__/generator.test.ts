@@ -106,25 +106,24 @@ describe("ARC56Generator", () => {
     const ARC56TestClient = module.ARC56TestClient;
     expect(ARC56TestClient).toBeDefined();
 
-    const appClient = new ARC56TestClient({
-      algod: localnet.algod,
-    });
-
-    expect(appClient.appId).toBe(0n);
-
     // 1. Create app
-    const { appId, appAddress } = await appClient
-      .create({
-        sender: dispenser,
-        templateVariables: { someNumber: 1337n },
-      })
-      .createApplication();
+    const { appClient, appId, appAddress } = await ARC56TestClient.create({
+      algod: localnet.algod,
+      sender: dispenser,
+      templateVariables: { someNumber: 1337n },
+    }).createApplication();
 
     expect(appId).toBeGreaterThan(0n);
     expect(appClient.appId).toBe(appId);
     expect(appAddress.toString()).toBe(
       algosdk.getApplicationAddress(appId).toString(),
     );
+
+    const existingClient = new ARC56TestClient({
+      appId,
+      algod: localnet.algod,
+    });
+    expect(existingClient.appId).toBe(appId);
 
     // 2. Call method with typed struct inputs
     const inputs = {
@@ -269,6 +268,6 @@ describe("ARC56Generator", () => {
     expect(code).toContain("calculate: (coords: Point): MethodParams => {");
     expect(code).toContain("hello: async (");
     expect(code).toContain("calculate: async (");
-    expect(code).toContain("create = (");
+    expect(code).toContain("static override create(");
   });
 });

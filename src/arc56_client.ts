@@ -21,6 +21,7 @@ export type AppClientMethodParams = Omit<
   MethodParams,
   "appID" | "method" | "sender" | "methodArgs"
 > & {
+  method: string;
   sender?: AddressWithTransactionSigner;
   methodArgs?: unknown[];
 };
@@ -41,6 +42,7 @@ export type MethodCallResult<TReturn = unknown> = {
 };
 
 export type CreateMethodCallResult<TReturn = unknown> = {
+  appClient: ARC56AppClient;
   appId: bigint;
   appAddress: algosdk.Address;
   result: MethodExecutionResult;
@@ -51,22 +53,25 @@ export type MethodReturnValue<T = unknown> = T;
 
 export interface ARC56AppClientParams {
   arc56: ARC56Contract;
-  appId?: bigint | number;
+  appId: bigint | number;
   algod: Algodv2;
   getSuggestedParams?: () => Promise<SuggestedParams>;
 }
 
+export type ARC56AppClientCreateParams = Omit<ARC56AppClientParams, "appId"> &
+  CreateMethodParams;
+
 export class ARC56AppClient {
-  appId: bigint;
+  readonly appId: bigint;
   algod: Algodv2;
   contract: algosdk.ABIContract;
-  appAddress: algosdk.Address;
+  readonly appAddress: algosdk.Address;
   arc56: ARC56Contract;
   getSuggestedParams?: () => Promise<SuggestedParams>;
 
   constructor(p: ARC56AppClientParams) {
     this.arc56 = p.arc56;
-    this.appId = p.appId !== undefined ? BigInt(p.appId) : 0n;
+    this.appId = BigInt(p.appId);
     this.appAddress = algosdk.getApplicationAddress(this.appId);
     this.algod = p.algod;
     this.contract = new algosdk.ABIContract({
@@ -607,40 +612,39 @@ export class ARC56AppClient {
     return new Uint8Array(Buffer.from(result.result, "base64"));
   }
 
-  getParams(
-    methodName: string,
-    methodParams?: AppClientMethodParams,
-  ): MethodParams {
-    const sender = methodParams?.sender;
+  getParams(params: AppClientMethodParams): MethodParams {
+    const sender = params.sender;
 
     if (sender === undefined) {
       throw new Error("No sender provided");
     }
 
-    let method: algosdk.ABIMethod;
+    let abiMethod: algosdk.ABIMethod;
     try {
-      method = this.contract.getMethodByName(methodName);
+      abiMethod = this.contract.getMethodByName(params.method);
     } catch {
       throw new Error(
-        `Method ${methodName} not found in ${this.arc56.name} ARC56 definition`,
+        `Method ${params.method} not found in ${this.arc56.name} ARC56 definition`,
       );
     }
 
-    const arc56Method = this.arc56.methods.find((m) => m.name === methodName);
+    const arc56Method = this.arc56.methods.find(
+      (m) => m.name === params.method,
+    );
     if (!arc56Method) {
       throw new Error(
-        `Method ${methodName} not found in ${this.arc56.name} ARC56 definition`,
+        `Method ${params.method} not found in ${this.arc56.name} ARC56 definition`,
       );
     }
 
-    const rawArgs = methodParams?.methodArgs ?? [];
+    const rawArgs = params.methodArgs ?? [];
     const encodedArgs = rawArgs.map((a, i) => {
       const argDef = arc56Method.args[i];
       if (!argDef) return a as algosdk.ABIValue;
       return this.getABIValue(argDef.struct ?? argDef.type, a);
     });
 
-    let boxes = methodParams?.boxes;
+    let boxes = params.boxes;
     if (boxes === undefined && arc56Method.recommendations?.boxes) {
       const recBoxes = Array.isArray(arc56Method.recommendations.boxes)
         ? arc56Method.recommendations.boxes
@@ -652,27 +656,27 @@ export class ARC56AppClient {
     }
 
     const appAccounts =
-      methodParams?.appAccounts ??
+      params.appAccounts ??
       (arc56Method.recommendations?.accounts
         ? arc56Method.recommendations.accounts
         : undefined);
 
     const appForeignApps =
-      methodParams?.appForeignApps ??
+      params.appForeignApps ??
       (arc56Method.recommendations?.apps
         ? arc56Method.recommendations.apps.map(BigInt)
         : undefined);
 
     const appForeignAssets =
-      methodParams?.appForeignAssets ??
+      params.appForeignAssets ??
       (arc56Method.recommendations?.assets
         ? arc56Method.recommendations.assets.map(BigInt)
         : undefined);
 
     return {
-      ...methodParams,
+      ...params,
       appID: this.appId,
-      method,
+      method: abiMethod,
       sender,
       methodArgs: encodedArgs,
       ...(boxes !== undefined ? { boxes } : {}),
@@ -683,16 +687,15 @@ export class ARC56AppClient {
   }
 
   private async callWithOC<TReturn = unknown>(
-    methodName: string,
     onComplete: algosdk.OnApplicationComplete,
-    methodParams: AppClientMethodParams = {},
+    params: AppClientMethodParams,
   ): Promise<MethodCallResult<TReturn>> {
     const callOrCreate = this.appId === 0n ? "create" : "call";
 
     const composer = this.composer();
 
     composer.addMethodCall({
-      ...this.getParams(methodName, methodParams),
+      ...this.getParams(params),
       onComplete,
     });
 
@@ -712,29 +715,33 @@ export class ARC56AppClient {
       "DeleteApplication",
     ];
 
-    const method = this.arc56.methods.find((m) => m.name === methodName);
-    if (!method) {
+    const arc56Method = this.arc56.methods.find(
+      (m) => m.name === params.method,
+    );
+    if (!arc56Method) {
       throw new Error(
-        `Method ${methodName} not found in ${this.arc56.name} ARC56 definition`,
+        `Method ${params.method} not found in ${this.arc56.name} ARC56 definition`,
       );
     }
 
     const ocString = ocStrings[onComplete] ?? "NoOp";
     if (
-      !(method.actions[callOrCreate] as readonly string[]).includes(ocString)
+      !(arc56Method.actions[callOrCreate] as readonly string[]).includes(
+        ocString,
+      )
     ) {
-      throw Error(`${ocString} is not supported for ${methodName}`);
+      throw Error(`${ocString} is not supported for ${params.method}`);
     }
 
     const result = await this.executeWithErrorParsing(composer);
 
     let returnValue: unknown = undefined;
 
-    if (method.returns.struct ?? method.returns.type !== "void") {
+    if (arc56Method.returns.struct ?? arc56Method.returns.type !== "void") {
       const lastRes = result.methodResults.at(-1);
       if (lastRes?.rawReturnValue && lastRes.rawReturnValue.length > 0) {
         returnValue = this.decodeMethodReturnValue(
-          methodName,
+          params.method,
           lastRes.rawReturnValue,
         );
       }
@@ -746,102 +753,101 @@ export class ARC56AppClient {
   }
 
   async methodCall<TReturn = unknown>(
-    methodName: string,
-    methodParams: AppClientMethodParams = {},
+    params: AppClientMethodParams,
   ): Promise<MethodCallResult<TReturn>> {
     return await this.callWithOC<TReturn>(
-      methodName,
       algosdk.OnApplicationComplete.NoOpOC,
-      methodParams,
+      params,
     );
   }
 
   async optInMethodCall<TReturn = unknown>(
-    methodName: string,
-    methodParams: AppClientMethodParams = {},
+    params: AppClientMethodParams,
   ): Promise<MethodCallResult<TReturn>> {
     return await this.callWithOC<TReturn>(
-      methodName,
       algosdk.OnApplicationComplete.OptInOC,
-      methodParams,
+      params,
     );
   }
 
   async updateMethodCall<TReturn = unknown>(
-    methodName: string,
-    methodParams: AppClientMethodParams = {},
+    params: AppClientMethodParams,
   ): Promise<MethodCallResult<TReturn>> {
     return await this.callWithOC<TReturn>(
-      methodName,
       algosdk.OnApplicationComplete.UpdateApplicationOC,
-      methodParams,
+      params,
     );
   }
 
   async deleteMethodCall<TReturn = unknown>(
-    methodName: string,
-    methodParams: AppClientMethodParams = {},
+    params: AppClientMethodParams,
   ): Promise<MethodCallResult<TReturn>> {
     return await this.callWithOC<TReturn>(
-      methodName,
       algosdk.OnApplicationComplete.DeleteApplicationOC,
-      methodParams,
+      params,
     );
   }
 
   async closeOutMethodCall<TReturn = unknown>(
-    methodName: string,
-    methodParams: AppClientMethodParams = {},
+    params: AppClientMethodParams,
   ): Promise<MethodCallResult<TReturn>> {
     return await this.callWithOC<TReturn>(
-      methodName,
       algosdk.OnApplicationComplete.CloseOutOC,
-      methodParams,
+      params,
     );
   }
 
   async clearStateMethodCall<TReturn = unknown>(
-    methodName: string,
-    methodParams: AppClientMethodParams = {},
+    params: AppClientMethodParams,
   ): Promise<MethodCallResult<TReturn>> {
     return await this.callWithOC<TReturn>(
-      methodName,
       algosdk.OnApplicationComplete.ClearStateOC,
-      methodParams,
+      params,
     );
   }
 
-  async createMethodCall<TReturn = unknown>(
-    methodName: string,
-    methodParams: CreateMethodParams = {},
+  static async create<TReturn = unknown>(
+    params: ARC56AppClientCreateParams,
   ): Promise<CreateMethodCallResult<TReturn>> {
-    if (this.appId !== 0n) {
-      throw Error(
-        `Create was called but the app has already been created: ${this.appId.toString()}`,
-      );
-    }
+    const { arc56, algod, getSuggestedParams, ...methodParams } = params;
+    const clientParams = { arc56, algod, getSuggestedParams };
+
+    const tempClient = new ARC56AppClient({
+      ...clientParams,
+      appId: 0n,
+    });
 
     const numGlobalByteSlices =
       methodParams.numGlobalByteSlices ??
-      this.arc56.state?.schema?.global?.bytes ??
+      tempClient.arc56.state?.schema?.global?.bytes ??
       0;
     const numGlobalInts =
-      methodParams.numGlobalInts ?? this.arc56.state?.schema?.global?.ints ?? 0;
+      methodParams.numGlobalInts ??
+      tempClient.arc56.state?.schema?.global?.ints ??
+      0;
     const numLocalByteSlices =
       methodParams.numLocalByteSlices ??
-      this.arc56.state?.schema?.local?.bytes ??
+      tempClient.arc56.state?.schema?.local?.bytes ??
       0;
     const numLocalInts =
-      methodParams.numLocalInts ?? this.arc56.state?.schema?.local?.ints ?? 0;
+      methodParams.numLocalInts ??
+      tempClient.arc56.state?.schema?.local?.ints ??
+      0;
 
     const approvalProgram =
       methodParams.approvalProgram ??
-      (await this.compileProgram("approval", methodParams.templateVariables));
+      (await tempClient.compileProgram(
+        "approval",
+        methodParams.templateVariables,
+      ));
     const clearProgram =
       methodParams.clearProgram ??
-      (await this.compileProgram("clear", methodParams.templateVariables));
+      (await tempClient.compileProgram(
+        "clear",
+        methodParams.templateVariables,
+      ));
 
-    const params: AppClientMethodParams = {
+    const callParams: AppClientMethodParams = {
       ...methodParams,
       numGlobalByteSlices,
       numGlobalInts,
@@ -851,25 +857,37 @@ export class ARC56AppClient {
       clearProgram,
     };
 
-    const result = await this.callWithOC<TReturn>(
-      methodName,
+    const result = await tempClient.callWithOC<TReturn>(
       methodParams.onComplete ?? algosdk.OnApplicationComplete.NoOpOC,
-      params,
+      callParams,
     );
 
     const createdAppId =
       result.result.methodResults.at(-1)?.txInfo?.applicationIndex;
-    if (createdAppId !== undefined) {
-      this.appId = createdAppId;
-      this.appAddress = algosdk.getApplicationAddress(this.appId);
+    if (createdAppId === undefined) {
+      throw Error(
+        "Application creation failed: applicationIndex not found in method execution result",
+      );
     }
 
+    const appClient = new ARC56AppClient({
+      ...clientParams,
+      appId: createdAppId,
+    });
+
     return {
-      appId: this.appId,
-      appAddress: this.appAddress,
+      appClient,
+      appId: appClient.appId,
+      appAddress: appClient.appAddress,
       result: result.result,
       returnValue: result.returnValue,
     };
+  }
+
+  static async createMethodCall<TReturn = unknown>(
+    params: ARC56AppClientCreateParams,
+  ): Promise<CreateMethodCallResult<TReturn>> {
+    return await ARC56AppClient.create<TReturn>(params);
   }
 
   getState = {
