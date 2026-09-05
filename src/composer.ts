@@ -10,6 +10,7 @@ import algosdk, {
 type ParamOverrides = {
   suggestedParams?: SuggestedParams;
   sender: AddressWithTransactionSigner;
+  signer?: TransactionSigner;
 };
 
 type OverriddenParams = Pick<
@@ -19,7 +20,7 @@ type OverriddenParams = Pick<
 
 type Params<SDKMethod extends (...args: any) => any> = Omit<
   Parameters<SDKMethod>[0],
-  "suggestedParams" | "sender"
+  "suggestedParams" | "sender" | "signer"
 > &
   ParamOverrides;
 
@@ -58,7 +59,7 @@ export class Composer {
     return {
       sender: sender.address,
       suggestedParams: suggestedParams ?? (await this.getSuggestedParams!()),
-      signer: sender.txnSigner,
+      signer: params.signer ?? sender.txnSigner,
     };
   }
 
@@ -69,6 +70,10 @@ export class Composer {
 
   addPayment(params: PaymentParams) {
     return this.add({ pay: params });
+  }
+
+  addMethodCall(params: MethodParams) {
+    return this.add({ method: params });
   }
 
   async buildGroup() {
