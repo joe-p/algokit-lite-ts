@@ -8,10 +8,10 @@ import arc56Json from "./fixtures/ARC56Test.arc56.json";
 describe("ARC56AppClient", () => {
   const localnet = new Localnet();
   const arc56 = arc56Json as unknown as ARC56Contract;
-  let dispenser: algosdk.AddressWithTransactionSigner;
+  let sender: algosdk.AddressWithTransactionSigner;
 
   beforeAll(async () => {
-    dispenser = await localnet.dispenser();
+    sender = await localnet.dispenser();
   });
 
   it("should create an application using createMethodCall", async () => {
@@ -25,7 +25,7 @@ describe("ARC56AppClient", () => {
     const { appId, appAddress, result } = await appClient.createMethodCall(
       "createApplication",
       {
-        sender: dispenser,
+        sender,
         templateVariables: { someNumber: 1337n },
       },
     );
@@ -40,7 +40,7 @@ describe("ARC56AppClient", () => {
     // Calling create again should throw
     expect(
       appClient.createMethodCall("createApplication", {
-        sender: dispenser,
+        sender,
         templateVariables: { someNumber: 1337n },
       }),
     ).rejects.toThrow("already been created");
@@ -53,14 +53,14 @@ describe("ARC56AppClient", () => {
     });
 
     await appClient.createMethodCall("createApplication", {
-      sender: dispenser,
+      sender,
       templateVariables: { someNumber: 1337n },
     });
 
     const inputs = { add: { a: 1n, b: 2n }, subtract: { a: 10n, b: 5n } };
 
     const { returnValue } = await appClient.methodCall("foo", {
-      sender: dispenser,
+      sender,
       methodArgs: [inputs],
     });
 
@@ -74,7 +74,7 @@ describe("ARC56AppClient", () => {
     });
 
     await appClient.createMethodCall("createApplication", {
-      sender: dispenser,
+      sender,
       templateVariables: { someNumber: 1337n },
     });
 
@@ -100,7 +100,7 @@ describe("ARC56AppClient", () => {
       algod: localnet.algod,
     });
     await appClient1.createMethodCall("createApplication", {
-      sender: dispenser,
+      sender,
       templateVariables: { someNumber: 1337n },
     });
 
@@ -109,7 +109,7 @@ describe("ARC56AppClient", () => {
       algod: localnet.algod,
     });
     await appClient2.createMethodCall("createApplication", {
-      sender: dispenser,
+      sender,
       templateVariables: { someNumber: 1337n },
     });
 
@@ -126,14 +126,14 @@ describe("ARC56AppClient", () => {
     composer
       .addMethodCall(
         appClient1.getParams("foo", {
-          sender: dispenser,
+          sender,
           suggestedParams: sp1,
           methodArgs: [inputs],
         }),
       )
       .addMethodCall(
         appClient2.getParams("foo", {
-          sender: dispenser,
+          sender,
           suggestedParams: sp2,
           methodArgs: [inputs],
         }),
@@ -162,14 +162,14 @@ describe("ARC56AppClient", () => {
     });
 
     await appClient.createMethodCall("createApplication", {
-      sender: dispenser,
+      sender,
       templateVariables: { someNumber: 1337n },
     });
 
     // subtract.a < subtract.b should trigger contract assertion
     expect(
       appClient.methodCall("foo", {
-        sender: dispenser,
+        sender,
         methodArgs: [{ add: { a: 1n, b: 2n }, subtract: { a: 1n, b: 100n } }],
       }),
     ).rejects.toThrow("subtract.a must be greater than subtract.b");
@@ -182,13 +182,13 @@ describe("ARC56AppClient", () => {
     });
 
     await appClient.createMethodCall("createApplication", {
-      sender: dispenser,
+      sender,
       templateVariables: { someNumber: 1337n },
     });
 
     // Calling foo sets globalKey and globalMap("foo")
     await appClient.methodCall("foo", {
-      sender: dispenser,
+      sender,
       methodArgs: [{ add: { a: 1n, b: 2n }, subtract: { a: 10n, b: 5n } }],
     });
 
@@ -206,7 +206,7 @@ describe("ARC56AppClient", () => {
     });
 
     await appClient.createMethodCall("createApplication", {
-      sender: dispenser,
+      sender,
       templateVariables: { someNumber: 1337n },
     });
 
@@ -214,7 +214,7 @@ describe("ARC56AppClient", () => {
     await localnet
       .composer()
       .addPayment({
-        sender: dispenser,
+        sender,
         receiver: appClient.appAddress,
         amount: 1_000_000n,
       })
@@ -229,7 +229,7 @@ describe("ARC56AppClient", () => {
     );
 
     await appClient.optInMethodCall("optInToApplication", {
-      sender: dispenser,
+      sender,
       boxes: [
         { appIndex: 0, name: box1 },
         { appIndex: 0, name: box2 },
@@ -237,13 +237,13 @@ describe("ARC56AppClient", () => {
     });
 
     // Verify local state
-    const localKey = await appClient.getState.key("localKey", dispenser);
+    const localKey = await appClient.getState.key("localKey", sender);
     expect(localKey).toBe(1337n);
 
     const localMapFoo = await appClient.getState.map.value(
       "localMap",
       "foo",
-      dispenser,
+      sender,
     );
     expect(localMapFoo).toBe("bar");
 
@@ -268,22 +268,22 @@ describe("ARC56AppClient", () => {
     expect(() => appClient.getParams("foo")).toThrow("No sender provided");
 
     // Non-existent method
-    expect(() =>
-      appClient.getParams("nonExistent", { sender: dispenser }),
-    ).toThrow("Method nonExistent not found");
+    expect(() => appClient.getParams("nonExistent", { sender })).toThrow(
+      "Method nonExistent not found",
+    );
 
     // Mismatched template variables count
     expect(
       appClient.createMethodCall("createApplication", {
-        sender: dispenser,
+        sender,
         templateVariables: {},
       }),
     ).rejects.toThrow("expected 1 template variables but got 0");
 
     // Unsupported action (foo only supports NoOp for call, so OptIn throws)
-    expect(
-      appClient.optInMethodCall("foo", { sender: dispenser }),
-    ).rejects.toThrow("OptIn is not supported for foo");
+    expect(appClient.optInMethodCall("foo", { sender })).rejects.toThrow(
+      "OptIn is not supported for foo",
+    );
   });
 
   it("should support latest ARC-56 StructField[] format", async () => {
@@ -324,13 +324,13 @@ describe("ARC56AppClient", () => {
     });
 
     await appClient.createMethodCall("createApplication", {
-      sender: dispenser,
+      sender,
       templateVariables: { someNumber: 1337n },
     });
 
     const inputs = { add: { a: 15n, b: 25n }, subtract: { a: 100n, b: 40n } };
     const { returnValue } = await appClient.methodCall("foo", {
-      sender: dispenser,
+      sender,
       methodArgs: [inputs],
     });
 
@@ -359,13 +359,13 @@ describe("ARC56AppClient", () => {
     });
 
     await appClient.createMethodCall("createApplication", {
-      sender: dispenser,
+      sender,
       templateVariables: { someNumber: 1337n },
     });
 
     expect(
       appClient.methodCall("foo", {
-        sender: dispenser,
+        sender,
         methodArgs: [{ add: { a: 1n, b: 2n }, subtract: { a: 1n, b: 100n } }],
       }),
     ).rejects.toThrow("subtract.a must be greater than subtract.b");
