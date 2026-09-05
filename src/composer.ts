@@ -18,7 +18,7 @@ type OverriddenParams = Pick<
   "suggestedParams" | "sender"
 >;
 
-type Params<SDKMethod extends (...args: any) => any> = Omit<
+type Params<SDKMethod extends (...args: never[]) => unknown> = Omit<
   Parameters<SDKMethod>[0],
   "suggestedParams" | "sender" | "signer"
 > &

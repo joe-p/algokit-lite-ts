@@ -16,6 +16,18 @@ export type GenerateAccountOpts = {
   fund?: bigint;
 };
 
+interface KmdWalletsResponse {
+  wallets: Array<{ id: string; name: string }>;
+}
+
+interface KmdInitWalletResponse {
+  wallet_handle_token: string;
+}
+
+interface KmdListKeysResponse {
+  addresses: string[];
+}
+
 export class Localnet {
   kmd: Kmd;
   algod: Algodv2;
@@ -94,9 +106,9 @@ export class Localnet {
   async getLocalAccounts() {
     const kmdClient = this.kmd;
 
-    const wallets = await kmdClient.listWallets();
+    const wallets = (await kmdClient.listWallets()) as KmdWalletsResponse;
 
-    let walletId;
+    let walletId: string | undefined;
     for (const wallet of wallets.wallets) {
       if (wallet.name === "unencrypted-default-wallet") walletId = wallet.id;
     }
@@ -104,10 +116,13 @@ export class Localnet {
     if (walletId === undefined)
       throw Error("No wallet named: unencrypted-default-wallet");
 
-    const handleResp = await kmdClient.initWalletHandle(walletId, "");
+    const handleResp = (await kmdClient.initWalletHandle(
+      walletId,
+      "",
+    )) as KmdInitWalletResponse;
     const handle = handleResp.wallet_handle_token;
 
-    const addresses = await kmdClient.listKeys(handle);
+    const addresses = (await kmdClient.listKeys(handle)) as KmdListKeysResponse;
     const acctPromises: Promise<{ private_key: Uint8Array }>[] = [];
 
     for (const addr of addresses.addresses) {

@@ -100,7 +100,9 @@ describe("ARC56Generator", () => {
     await generator.generateToFile(clientPath);
 
     // Dynamically import the generated client
-    const module = await import(clientPath);
+    const module = (await import(clientPath)) as typeof import(
+      "../example/ARC56TestClient"
+    );
     const ARC56TestClient = module.ARC56TestClient;
     expect(ARC56TestClient).toBeDefined();
 

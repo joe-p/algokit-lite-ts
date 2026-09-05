@@ -1,5 +1,10 @@
 import algosdk from "algosdk";
-import type { ARC56Contract, StructFields, StructField } from "./types/arc56";
+import type {
+  ARC56Contract,
+  StructFields,
+  StructField,
+  Method,
+} from "./types/arc56";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -38,9 +43,7 @@ export class ARC56Generator {
       .replaceAll(")", "]");
   }
 
-  private structDefToTsType(
-    def: StructField[] | StructFields | Record<string, any> | string,
-  ): string {
+  private structDefToTsType(def: StructField[] | StructFields | string): string {
     if (Array.isArray(def)) {
       const fields = def.map((f: StructField) => {
         const fieldType = Array.isArray(f.type)
@@ -50,10 +53,9 @@ export class ARC56Generator {
       });
       return `{\n${fields.join("\n")}\n}`;
     } else if (typeof def === "object") {
-      const fields = Object.keys(def).map((key) => {
-        const val = def[key];
+      const fields = Object.entries(def).map(([key, val]) => {
         const fieldType =
-          typeof val === "object" && val !== null && !Array.isArray(val)
+          typeof val === "object"
             ? this.structDefToTsType(val)
             : this.getTypeScriptType(val);
         return `  ${key}: ${fieldType};`;
@@ -139,16 +141,18 @@ export class ARC56Generator {
       });
     }
 
-    const pushStructFields = (fields: any) => {
+    const pushStructFields = (
+      fields: StructField[] | StructFields | StructField["type"],
+    ) => {
       if (Array.isArray(fields)) {
-        fields.forEach((sf: any) => {
+        fields.forEach((sf) => {
           if (typeof sf.type === "string") pushType(sf.type);
           else pushStructFields(sf.type);
         });
-      } else if (typeof fields === "object" && fields !== null) {
-        Object.values(fields).forEach((sf: any) => {
-          if (typeof sf === "string") pushType(sf);
-          else pushStructFields(sf);
+      } else if (typeof fields === "object") {
+        Object.values(fields).forEach((val) => {
+          if (typeof val === "string") pushType(val);
+          else pushStructFields(val);
         });
       }
     };
@@ -263,7 +267,12 @@ export class ARC56Generator {
   getCallLines(): string[] {
     const lines: string[] = [];
 
-    const ocMap: Record<string, { property: string; clientMethod: string }> = {
+    type OnCompleteCallAction = Method["actions"]["call"][number];
+
+    const ocMap: Record<
+      OnCompleteCallAction,
+      { property: string; clientMethod: string }
+    > = {
       NoOp: { property: "call", clientMethod: "methodCall" },
       OptIn: { property: "optIn", clientMethod: "optInMethodCall" },
       CloseOut: { property: "closeOut", clientMethod: "closeOutMethodCall" },
@@ -281,12 +290,20 @@ export class ARC56Generator {
       },
     };
 
-    for (const oc of Object.keys(ocMap)) {
+    const ocs: OnCompleteCallAction[] = [
+      "NoOp",
+      "OptIn",
+      "CloseOut",
+      "ClearState",
+      "UpdateApplication",
+      "DeleteApplication",
+    ];
+
+    for (const oc of ocs) {
       const entry = ocMap[oc];
-      if (!entry) continue;
       const { property, clientMethod } = entry;
       const methods = this.arc56.methods.filter((m) =>
-        m.actions.call.includes(oc as any),
+        m.actions.call.includes(oc),
       );
 
       if (methods.length === 0) continue;
