@@ -18,7 +18,6 @@ describe("ARC56AppClient", () => {
     const appClient = new ARC56AppClient({
       arc56,
       algod: localnet.algod,
-      defaultSender: dispenser,
     });
 
     expect(appClient.appId).toBe(0n);
@@ -26,6 +25,7 @@ describe("ARC56AppClient", () => {
     const { appId, appAddress, result } = await appClient.createMethodCall(
       "createApplication",
       {
+        sender: dispenser,
         templateVariables: { someNumber: 1337n },
       },
     );
@@ -40,6 +40,7 @@ describe("ARC56AppClient", () => {
     // Calling create again should throw
     expect(
       appClient.createMethodCall("createApplication", {
+        sender: dispenser,
         templateVariables: { someNumber: 1337n },
       }),
     ).rejects.toThrow("already been created");
@@ -49,16 +50,17 @@ describe("ARC56AppClient", () => {
     const appClient = new ARC56AppClient({
       arc56,
       algod: localnet.algod,
-      defaultSender: dispenser,
     });
 
     await appClient.createMethodCall("createApplication", {
+      sender: dispenser,
       templateVariables: { someNumber: 1337n },
     });
 
     const inputs = { add: { a: 1n, b: 2n }, subtract: { a: 10n, b: 5n } };
 
     const { returnValue } = await appClient.methodCall("foo", {
+      sender: dispenser,
       methodArgs: [inputs],
     });
 
@@ -69,10 +71,10 @@ describe("ARC56AppClient", () => {
     const appClient = new ARC56AppClient({
       arc56,
       algod: localnet.algod,
-      defaultSender: dispenser,
     });
 
     await appClient.createMethodCall("createApplication", {
+      sender: dispenser,
       templateVariables: { someNumber: 1337n },
     });
 
@@ -96,18 +98,18 @@ describe("ARC56AppClient", () => {
     const appClient1 = new ARC56AppClient({
       arc56,
       algod: localnet.algod,
-      defaultSender: dispenser,
     });
     await appClient1.createMethodCall("createApplication", {
+      sender: dispenser,
       templateVariables: { someNumber: 1337n },
     });
 
     const appClient2 = new ARC56AppClient({
       arc56,
       algod: localnet.algod,
-      defaultSender: dispenser,
     });
     await appClient2.createMethodCall("createApplication", {
+      sender: dispenser,
       templateVariables: { someNumber: 1337n },
     });
 
@@ -124,12 +126,14 @@ describe("ARC56AppClient", () => {
     composer
       .addMethodCall(
         appClient1.getParams("foo", {
+          sender: dispenser,
           suggestedParams: sp1,
           methodArgs: [inputs],
         }),
       )
       .addMethodCall(
         appClient2.getParams("foo", {
+          sender: dispenser,
           suggestedParams: sp2,
           methodArgs: [inputs],
         }),
@@ -155,16 +159,17 @@ describe("ARC56AppClient", () => {
     const appClient = new ARC56AppClient({
       arc56,
       algod: localnet.algod,
-      defaultSender: dispenser,
     });
 
     await appClient.createMethodCall("createApplication", {
+      sender: dispenser,
       templateVariables: { someNumber: 1337n },
     });
 
     // subtract.a < subtract.b should trigger contract assertion
     expect(
       appClient.methodCall("foo", {
+        sender: dispenser,
         methodArgs: [{ add: { a: 1n, b: 2n }, subtract: { a: 1n, b: 100n } }],
       }),
     ).rejects.toThrow("subtract.a must be greater than subtract.b");
@@ -174,15 +179,16 @@ describe("ARC56AppClient", () => {
     const appClient = new ARC56AppClient({
       arc56,
       algod: localnet.algod,
-      defaultSender: dispenser,
     });
 
     await appClient.createMethodCall("createApplication", {
+      sender: dispenser,
       templateVariables: { someNumber: 1337n },
     });
 
     // Calling foo sets globalKey and globalMap("foo")
     await appClient.methodCall("foo", {
+      sender: dispenser,
       methodArgs: [{ add: { a: 1n, b: 2n }, subtract: { a: 10n, b: 5n } }],
     });
 
@@ -197,10 +203,10 @@ describe("ARC56AppClient", () => {
     const appClient = new ARC56AppClient({
       arc56,
       algod: localnet.algod,
-      defaultSender: dispenser,
     });
 
     await appClient.createMethodCall("createApplication", {
+      sender: dispenser,
       templateVariables: { someNumber: 1337n },
     });
 
@@ -223,6 +229,7 @@ describe("ARC56AppClient", () => {
     );
 
     await appClient.optInMethodCall("optInToApplication", {
+      sender: dispenser,
       boxes: [
         { appIndex: 0, name: box1 },
         { appIndex: 0, name: box2 },
@@ -252,38 +259,31 @@ describe("ARC56AppClient", () => {
   });
 
   it("should validate method names, sender requirements, and template variables", async () => {
-    const appClientNoSender = new ARC56AppClient({
+    const appClient = new ARC56AppClient({
       arc56,
       algod: localnet.algod,
     });
 
     // Missing sender
-    expect(() => appClientNoSender.getParams("foo")).toThrow(
-      "No sender provided",
-    );
-
-    const appClient = new ARC56AppClient({
-      arc56,
-      algod: localnet.algod,
-      defaultSender: dispenser,
-    });
+    expect(() => appClient.getParams("foo")).toThrow("No sender provided");
 
     // Non-existent method
-    expect(() => appClient.getParams("nonExistent")).toThrow(
-      "Method nonExistent not found",
-    );
+    expect(() =>
+      appClient.getParams("nonExistent", { sender: dispenser }),
+    ).toThrow("Method nonExistent not found");
 
     // Mismatched template variables count
     expect(
       appClient.createMethodCall("createApplication", {
+        sender: dispenser,
         templateVariables: {},
       }),
     ).rejects.toThrow("expected 1 template variables but got 0");
 
     // Unsupported action (foo only supports NoOp for call, so OptIn throws)
-    expect(appClient.optInMethodCall("foo")).rejects.toThrow(
-      "OptIn is not supported for foo",
-    );
+    expect(
+      appClient.optInMethodCall("foo", { sender: dispenser }),
+    ).rejects.toThrow("OptIn is not supported for foo");
   });
 
   it("should support latest ARC-56 StructField[] format", async () => {
@@ -321,15 +321,16 @@ describe("ARC56AppClient", () => {
     const appClient = new ARC56AppClient({
       arc56: arc56LatestStructs,
       algod: localnet.algod,
-      defaultSender: dispenser,
     });
 
     await appClient.createMethodCall("createApplication", {
+      sender: dispenser,
       templateVariables: { someNumber: 1337n },
     });
 
     const inputs = { add: { a: 15n, b: 25n }, subtract: { a: 100n, b: 40n } };
     const { returnValue } = await appClient.methodCall("foo", {
+      sender: dispenser,
       methodArgs: [inputs],
     });
 
@@ -355,15 +356,16 @@ describe("ARC56AppClient", () => {
     const appClient = new ARC56AppClient({
       arc56: arc56LatestSourceInfo,
       algod: localnet.algod,
-      defaultSender: dispenser,
     });
 
     await appClient.createMethodCall("createApplication", {
+      sender: dispenser,
       templateVariables: { someNumber: 1337n },
     });
 
     expect(
       appClient.methodCall("foo", {
+        sender: dispenser,
         methodArgs: [{ add: { a: 1n, b: 2n }, subtract: { a: 1n, b: 100n } }],
       }),
     ).rejects.toThrow("subtract.a must be greater than subtract.b");

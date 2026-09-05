@@ -18,24 +18,30 @@ export type CreateMethodParams = AppClientMethodParams & {
   templateVariables?: Record<string, string | bigint | number | Uint8Array>;
 };
 
+export type MethodExecutionResult = {
+  confirmedRound: bigint;
+  txIDs: string[];
+  methodResults: algosdk.ABIResult[];
+};
+
+export interface ARC56AppClientParams {
+  arc56: ARC56Contract;
+  appId?: bigint | number;
+  algod: Algodv2;
+  getSuggestedParams?: () => Promise<SuggestedParams>;
+}
+
 export class ARC56AppClient {
   appId: bigint;
   algod: Algodv2;
   contract: algosdk.ABIContract;
-  defaultSender?: AddressWithTransactionSigner;
   appAddress: algosdk.Address;
   arc56: ARC56Contract;
   getSuggestedParams?: () => Promise<SuggestedParams>;
 
-  constructor(p: {
-    arc56: ARC56Contract;
-    appId?: bigint;
-    algod: Algodv2;
-    defaultSender?: AddressWithTransactionSigner;
-    getSuggestedParams?: () => Promise<SuggestedParams>;
-  }) {
+  constructor(p: ARC56AppClientParams) {
     this.arc56 = p.arc56;
-    this.appId = p.appId ?? 0n;
+    this.appId = p.appId !== undefined ? BigInt(p.appId) : 0n;
     this.appAddress = algosdk.getApplicationAddress(this.appId);
     this.algod = p.algod;
     this.contract = new algosdk.ABIContract({
@@ -45,7 +51,6 @@ export class ARC56AppClient {
       desc: this.arc56.desc,
       networks: this.arc56.networks,
     });
-    this.defaultSender = p.defaultSender;
     this.getSuggestedParams = p.getSuggestedParams;
   }
 
@@ -559,7 +564,7 @@ export class ARC56AppClient {
     methodName: string,
     methodParams?: AppClientMethodParams,
   ): MethodParams {
-    const sender = methodParams?.sender ?? this.defaultSender;
+    const sender = methodParams?.sender;
 
     if (sender === undefined) {
       throw new Error("No sender provided");
@@ -736,6 +741,17 @@ export class ARC56AppClient {
     return await this.callWithOC(
       methodName,
       algosdk.OnApplicationComplete.CloseOutOC,
+      methodParams,
+    );
+  }
+
+  async clearStateMethodCall(
+    methodName: string,
+    methodParams: AppClientMethodParams = {},
+  ) {
+    return await this.callWithOC(
+      methodName,
+      algosdk.OnApplicationComplete.ClearStateOC,
       methodParams,
     );
   }
