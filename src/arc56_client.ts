@@ -114,6 +114,7 @@ export class ARC56AppClient {
       if (errorMessage) {
         throw Error(
           `Runtime error when executing ${this.arc56.name} (appId: ${this.appId}) in transaction ${txId}: ${errorMessage}`,
+          { cause: e },
         );
       }
 

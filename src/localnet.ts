@@ -60,9 +60,8 @@ export class Localnet {
     const keypair = nacl.sign.keyPair.fromSeed(seed);
     const signingKey: Ed25519SigningKey = {
       ed25519PublicKey: keypair.publicKey,
-      ed25519Signer: async (bytesToSign) => {
-        return nacl.sign.detached(bytesToSign, keypair.secretKey);
-      },
+      ed25519Signer: (bytesToSign) =>
+        Promise.resolve(nacl.sign.detached(bytesToSign, keypair.secretKey)),
     };
 
     const account = addressWithSignersFromRawEd25519Signer(signingKey);
@@ -117,7 +116,7 @@ export class Localnet {
     const keys = await Promise.all(acctPromises);
 
     // Don't need to wait for it
-    kmdClient.releaseWalletHandle(handle);
+    void kmdClient.releaseWalletHandle(handle);
 
     const accounts = keys.map((k) => {
       const addr = new algosdk.Address(k.private_key.slice(32));
@@ -125,8 +124,8 @@ export class Localnet {
 
       return algosdk.addressWithSignersFromRawEd25519Signer({
         ed25519PublicKey: acct.addr.publicKey,
-        ed25519Signer: async (bytesToSign: Uint8Array) =>
-          nacl.sign.detached(bytesToSign, acct.sk),
+        ed25519Signer: (bytesToSign: Uint8Array) =>
+          Promise.resolve(nacl.sign.detached(bytesToSign, acct.sk)),
       });
     });
 

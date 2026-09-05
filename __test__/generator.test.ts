@@ -3,7 +3,6 @@ import algosdk from "algosdk";
 import * as path from "path";
 import * as fs from "fs";
 import { Localnet } from "../src/localnet";
-import { Composer } from "../src/composer";
 import { ARC56Generator } from "../src/generator";
 import type { ARC56Contract } from "../src/types/arc56";
 import arc56Json from "./fixtures/ARC56Test.arc56.json";
@@ -201,12 +200,12 @@ describe("ARC56Generator", () => {
 
     // 7. Decode return value
     const decoded = appClient.decodeReturnValue.foo(
-      compResult.methodResults[0]!.rawReturnValue!,
+      compResult.methodResults[0]!.rawReturnValue,
     );
     expect(decoded).toEqual({ sum: 30n, difference: 35n });
 
     // 8. Error handling
-    await expect(
+    expect(
       appClient.call({ sender: dispenser }).foo({
         add: { a: 1n, b: 2n },
         subtract: { a: 1n, b: 100n },

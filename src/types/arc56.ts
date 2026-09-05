@@ -1,5 +1,5 @@
 /** An ABI-encoded type */
-export type ABIType = string;
+export type ABIType = string & {};
 
 /** The name of a defined struct */
 export type StructName = string;
@@ -21,7 +21,7 @@ export interface StructField {
   /** The name of the struct field */
   name: string;
   /** The type of the struct field's value */
-  type: ABIType | StructName | StructField[];
+  type: ABIType | StructField[];
 }
 
 /** Legacy mapping of named structs to field types */
@@ -34,9 +34,9 @@ export interface StorageKey {
   /** Description of what this storage key holds */
   desc?: string;
   /** The type of the key */
-  keyType: ABIType | AVMType | StructName;
+  keyType: ABIType | AVMType;
   /** The type of the value */
-  valueType: ABIType | AVMType | StructName;
+  valueType: ABIType | AVMType;
   /** The bytes of the key encoded as base64 */
   key: string;
 }
@@ -45,9 +45,9 @@ export interface StorageMap {
   /** Description of what the key-value pairs in this mapping hold */
   desc?: string;
   /** The type of the keys in the map */
-  keyType: ABIType | AVMType | StructName;
+  keyType: ABIType | AVMType;
   /** The type of the values in the map */
-  valueType: ABIType | AVMType | StructName;
+  valueType: ABIType | AVMType;
   /** The prefix of the map keys, encoded as base64 */
   prefix?: string;
 }
@@ -285,7 +285,7 @@ export interface ARC56Contract {
   templateVariables?: {
     [name: string]: {
       /** The type of the template variable */
-      type: ABIType | AVMType | StructName;
+      type: ABIType | AVMType;
       /** If given, the base64 encoded value used for the given app/program */
       value?: string;
     };
@@ -294,7 +294,7 @@ export interface ARC56Contract {
   scratchVariables?: {
     [name: string]: {
       slot: number;
-      type: ABIType | AVMType | StructName;
+      type: ABIType | AVMType;
     };
   };
 }

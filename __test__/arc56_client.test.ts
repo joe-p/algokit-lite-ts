@@ -258,7 +258,7 @@ describe("ARC56AppClient", () => {
     expect(boxMapVal).toEqual({ sum: 3n, difference: 1n });
   });
 
-  it("should validate method names, sender requirements, and template variables", async () => {
+  it("should validate method names, sender requirements, and template variables", () => {
     const appClient = new ARC56AppClient({
       arc56,
       algod: localnet.algod,

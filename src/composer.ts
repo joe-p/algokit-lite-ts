@@ -48,9 +48,11 @@ export class Composer {
   private async getSdkParams(
     params: ParamOverrides & { signer?: TransactionSigner },
   ): Promise<OverriddenParams & { signer: TransactionSigner }> {
-    const { sender, suggestedParams } = params;
+    const { sender } = params;
 
-    if (suggestedParams === undefined && this.getSuggestedParams == undefined) {
+    const suggestedParams =
+      params.suggestedParams ?? (await this.getSuggestedParams?.());
+    if (suggestedParams === undefined) {
       throw Error(
         "Transaction missing suggestedParams and this.getSuggestedParams is undefined",
       );
@@ -58,7 +60,7 @@ export class Composer {
 
     return {
       sender: sender.address,
-      suggestedParams: suggestedParams ?? (await this.getSuggestedParams!()),
+      suggestedParams,
       signer: params.signer ?? sender.txnSigner,
     };
   }

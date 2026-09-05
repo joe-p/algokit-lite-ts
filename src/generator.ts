@@ -39,7 +39,9 @@ export class ARC56Generator {
       .replaceAll(")", "]");
   }
 
-  private structDefToTsType(def: StructField[] | StructFields | any): string {
+  private structDefToTsType(
+    def: StructField[] | StructFields | Record<string, any> | string,
+  ): string {
     if (Array.isArray(def)) {
       const fields = def.map((f: StructField) => {
         const fieldType =
