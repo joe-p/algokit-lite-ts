@@ -199,9 +199,9 @@ describe("ARC56Generator", () => {
     expect(compResult.confirmedRound).toBeGreaterThan(0n);
 
     // 7. Decode return value
-    const decoded = appClient.decodeReturnValue.foo(
-      compResult.methodResults[0]!.rawReturnValue,
-    );
+    const firstResult = compResult.methodResults[0];
+    if (!firstResult) throw new Error("Expected method result");
+    const decoded = appClient.decodeReturnValue.foo(firstResult.rawReturnValue);
     expect(decoded).toEqual({ sum: 30n, difference: 35n });
 
     // 8. Error handling

@@ -142,14 +142,12 @@ describe("ARC56AppClient", () => {
     const result = await composer.execute(localnet.algod);
     expect(result.methodResults.length).toBe(2);
 
-    const res1 = appClient1.decodeMethodReturnValue(
-      "foo",
-      result.methodResults[0]!.rawReturnValue,
-    );
-    const res2 = appClient2.decodeMethodReturnValue(
-      "foo",
-      result.methodResults[1]!.rawReturnValue,
-    );
+    const r1 = result.methodResults[0];
+    const r2 = result.methodResults[1];
+    if (!r1 || !r2) throw new Error("Expected method results");
+
+    const res1 = appClient1.decodeMethodReturnValue("foo", r1.rawReturnValue);
+    const res2 = appClient2.decodeMethodReturnValue("foo", r2.rawReturnValue);
 
     expect(res1).toEqual({ sum: 3n, difference: 5n });
     expect(res2).toEqual({ sum: 3n, difference: 5n });
@@ -338,7 +336,9 @@ describe("ARC56AppClient", () => {
   });
 
   it("should support latest ARC-56 approval.sourceInfo format with pcOffsetMethod", async () => {
-    const rawSourceInfo = (arc56.sourceInfo as any[]) ?? [];
+    const rawSourceInfo = Array.isArray(arc56.sourceInfo)
+      ? arc56.sourceInfo
+      : [];
     const arc56LatestSourceInfo: ARC56Contract = {
       ...arc56,
       sourceInfo: {

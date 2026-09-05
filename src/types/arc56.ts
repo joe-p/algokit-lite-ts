@@ -201,40 +201,40 @@ export interface ARC56Contract {
     };
   };
   /** Named structs used by the application. Each struct field appears in the same order as ABI encoding. */
-  structs: { [structName: StructName]: StructField[] | StructFields };
+  structs?: { [structName: StructName]: StructField[] | StructFields };
   /** All of the methods that the contract implements */
   methods: Method[];
-  state: {
+  state?: {
     /** Defines the values that should be used for GlobalNumUint, GlobalNumByteSlice, LocalNumUint, and LocalNumByteSlice when creating the application  */
-    schema: {
-      global: {
+    schema?: {
+      global?: {
         ints: number;
         bytes: number;
       };
-      local: {
+      local?: {
         ints: number;
         bytes: number;
       };
     };
     /** Mapping of human-readable names to StorageKey objects */
-    keys: {
-      global: { [name: string]: StorageKey };
-      local: { [name: string]: StorageKey };
-      box: { [name: string]: StorageKey };
+    keys?: {
+      global?: { [name: string]: StorageKey };
+      local?: { [name: string]: StorageKey };
+      box?: { [name: string]: StorageKey };
     };
     /** Mapping of human-readable names to StorageMap objects */
-    maps: {
-      global: { [name: string]: StorageMap };
-      local: { [name: string]: StorageMap };
-      box: { [name: string]: StorageMap };
+    maps?: {
+      global?: { [name: string]: StorageMap };
+      local?: { [name: string]: StorageMap };
+      box?: { [name: string]: StorageMap };
     };
   };
   /** Supported bare actions for the contract. An action is a combination of call/create and an OnComplete */
-  bareActions: {
+  bareActions?: {
     /** OnCompletes this method allows when appID === 0 */
-    create: ("NoOp" | "OptIn" | "DeleteApplication")[];
+    create?: ("NoOp" | "OptIn" | "DeleteApplication")[];
     /** OnCompletes this method allows when appID !== 0 */
-    call: (
+    call?: (
       | "NoOp"
       | "OptIn"
       | "CloseOut"

@@ -89,9 +89,9 @@ export class ARC56AppClient {
       if (pc !== undefined && this.arc56.sourceInfo) {
         if (Array.isArray(this.arc56.sourceInfo)) {
           errorMessage = this.arc56.sourceInfo.find((s) =>
-            s?.pc?.includes(pc),
+            s.pc.includes(pc),
           )?.errorMessage;
-        } else if (this.arc56.sourceInfo.approval) {
+        } else {
           const approvalInfo = this.arc56.sourceInfo.approval;
           let targetPc = pc;
           if (approvalInfo.pcOffsetMethod === "cblocks") {
@@ -106,7 +106,7 @@ export class ARC56AppClient {
             }
           }
           errorMessage = approvalInfo.sourceInfo.find((s) =>
-            s?.pc?.includes(targetPc),
+            s.pc.includes(targetPc),
           )?.errorMessage;
         }
       }
@@ -133,16 +133,17 @@ export class ARC56AppClient {
     let intcblockOffset: number | undefined;
 
     while (bytes.length > 0) {
-      const byte = bytes.shift()!;
+      const byte = bytes.shift();
+      if (byte === undefined) break;
       if (byte === BYTE_CBLOCK || byte === INT_CBLOCK) {
         const isBytecblock = byte === BYTE_CBLOCK;
-        const valuesRemaining = bytes.shift()!;
+        const valuesRemaining = bytes.shift() ?? 0;
         for (let i = 0; i < valuesRemaining; i++) {
           if (isBytecblock) {
-            const length = bytes.shift()!;
+            const length = bytes.shift() ?? 0;
             bytes.splice(0, length);
           } else {
-            while ((bytes.shift()! & 0x80) !== 0) {
+            while (((bytes.shift() ?? 0) & 0x80) !== 0) {
               // intcblock is a uvarint
             }
           }
@@ -344,7 +345,7 @@ export class ARC56AppClient {
       throw new Error(`Local state key not found: ${b64Key}`);
     }
 
-    if (Number(keyValue.value.type) === 1) {
+    if (keyValue.value.type === 1) {
       const bytes =
         keyValue.value.bytes instanceof Uint8Array
           ? keyValue.value.bytes
@@ -392,7 +393,7 @@ export class ARC56AppClient {
       throw new Error(`Global state key not found: ${b64Key}`);
     }
 
-    if (Number(keyValue.value.type) === 1) {
+    if (keyValue.value.type === 1) {
       const bytes =
         keyValue.value.bytes instanceof Uint8Array
           ? keyValue.value.bytes
@@ -806,7 +807,7 @@ export class ARC56AppClient {
     const createdAppId =
       result.result.methodResults.at(-1)?.txInfo?.applicationIndex;
     if (createdAppId !== undefined) {
-      this.appId = BigInt(createdAppId);
+      this.appId = createdAppId;
       this.appAddress = algosdk.getApplicationAddress(this.appId);
     }
 
@@ -913,7 +914,7 @@ export class ARC56AppClient {
     if (!method) {
       throw new Error(`Method ${methodName} not found in ${this.arc56.name}`);
     }
-    if (method.returns.type === "void" || !rawValue || rawValue.length === 0) {
+    if (method.returns.type === "void" || rawValue.length === 0) {
       return undefined;
     }
     return this.getTypeScriptValue(

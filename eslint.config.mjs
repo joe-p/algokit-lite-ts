@@ -8,10 +8,7 @@ export default defineConfig(
   },
   {
     files: ["**/*.{js,ts}"],
-    extends: [
-      js.configs.recommended,
-      ...tseslint.configs.recommendedTypeChecked,
-    ],
+    extends: [js.configs.recommended, ...tseslint.configs.strictTypeChecked],
     languageOptions: {
       parserOptions: {
         projectService: true,
@@ -25,7 +22,10 @@ export default defineConfig(
       "@typescript-eslint/no-unsafe-call": "off",
       "@typescript-eslint/no-unsafe-return": "off",
       "@typescript-eslint/no-unsafe-argument": "off",
+      "@typescript-eslint/restrict-template-expressions": [
+        "error",
+        { allowNumber: true, allowAny: true },
+      ],
     },
   },
 );
-

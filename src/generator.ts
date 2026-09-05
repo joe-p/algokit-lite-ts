@@ -31,9 +31,8 @@ export class ARC56Generator {
       return type;
     }
 
-    return type
-      .split(".")
-      .at(-1)!
+    const lastPart = type.split(".").at(-1) ?? "";
+    return lastPart
       .replace(/\[\d+\]/g, "[]")
       .replaceAll("(", "[")
       .replaceAll(")", "]");
@@ -44,14 +43,13 @@ export class ARC56Generator {
   ): string {
     if (Array.isArray(def)) {
       const fields = def.map((f: StructField) => {
-        const fieldType =
-          typeof f.type === "object" && f.type !== null
-            ? this.structDefToTsType(f.type)
-            : this.getTypeScriptType(f.type);
+        const fieldType = Array.isArray(f.type)
+          ? this.structDefToTsType(f.type)
+          : this.getTypeScriptType(f.type);
         return `  ${f.name}: ${fieldType};`;
       });
       return `{\n${fields.join("\n")}\n}`;
-    } else if (typeof def === "object" && def !== null) {
+    } else if (typeof def === "object") {
       const fields = Object.keys(def).map((key) => {
         const val = def[key];
         const fieldType =
@@ -62,7 +60,7 @@ export class ARC56Generator {
       });
       return `{\n${fields.join("\n")}\n}`;
     }
-    return this.getTypeScriptType(String(def));
+    return this.getTypeScriptType(def);
   }
 
   getABITypeLines(): string[] {
@@ -73,7 +71,7 @@ export class ARC56Generator {
       if (abiTypes.includes(type)) return;
       if (["void", "string"].includes(type)) return;
 
-      const baseName = type.split(".").at(-1)!;
+      const baseName = type.split(".").at(-1) ?? "";
       if (
         this.arc56.structs &&
         (this.arc56.structs[type] || this.arc56.structs[baseName])
@@ -100,7 +98,9 @@ export class ARC56Generator {
           return;
         } catch {
           const inner = type.slice(1, -1);
-          inner.split(",").forEach((t) => pushType(t.trim()));
+          inner.split(",").forEach((t) => {
+            pushType(t.trim());
+          });
           return;
         }
       }
@@ -199,7 +199,7 @@ export class ARC56Generator {
     const structLines = Object.keys(this.arc56.structs)
       .filter((structName) => !structName.includes(" "))
       .map((structName) => {
-        const cleanName = structName.split(".").at(-1)!;
+        const cleanName = structName.split(".").at(-1) ?? "";
         const tsBody = this.structDefToTsType(this.arc56.structs[structName]);
         return `export type ${cleanName} = ${tsBody};`;
       });
@@ -222,7 +222,7 @@ export class ARC56Generator {
     ];
 
     Object.keys(this.arc56.templateVariables).forEach((name) => {
-      const varDef = this.arc56.templateVariables![name];
+      const varDef = this.arc56.templateVariables?.[name];
       if (varDef) {
         lines.push(`  ${name}: ${this.getTypeScriptType(varDef.type)};`);
       }
@@ -286,7 +286,7 @@ export class ARC56Generator {
       if (!entry) continue;
       const { property, clientMethod } = entry;
       const methods = this.arc56.methods.filter((m) =>
-        m.actions.call?.includes(oc as any),
+        m.actions.call.includes(oc as any),
       );
 
       if (methods.length === 0) continue;
@@ -325,7 +325,7 @@ export class ARC56Generator {
   getCreateLines(): string[] {
     const lines: string[] = [];
     const createMethods = this.arc56.methods.filter(
-      (m) => m.actions.create && m.actions.create.length > 0,
+      (m) => m.actions.create.length > 0,
     );
     if (createMethods.length === 0) return [];
 
@@ -375,12 +375,12 @@ export class ARC56Generator {
     const hasKeys =
       this.arc56.state.keys &&
       Object.values(this.arc56.state.keys).some(
-        (k) => Object.keys(k ?? {}).length > 0,
+        (k) => Object.keys(k).length > 0,
       );
     const hasMaps =
       this.arc56.state.maps &&
       Object.values(this.arc56.state.maps).some(
-        (m) => Object.keys(m ?? {}).length > 0,
+        (m) => Object.keys(m).length > 0,
       );
 
     if (!hasKeys && !hasMaps) return [];
