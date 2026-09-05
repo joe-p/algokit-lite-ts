@@ -4,14 +4,25 @@ import algosdk, {
   type SuggestedParams,
 } from "algosdk";
 import { Composer, type MethodParams } from "./composer";
-import { type ARC56Contract, type StorageMap } from "./types/arc56";
+import {
+  type ARC56Contract,
+  type StorageMap,
+  type StructField,
+  type StructFields,
+} from "./types/arc56";
+
+function isRecord(val: unknown): val is Record<string, unknown> {
+  return typeof val === "object" && val !== null && !Array.isArray(val);
+}
+
+type StructDef = StructField[] | StructFields | StructField["type"];
 
 export type AppClientMethodParams = Omit<
   MethodParams,
   "appID" | "method" | "sender" | "methodArgs"
 > & {
   sender?: AddressWithTransactionSigner;
-  methodArgs?: any[];
+  methodArgs?: unknown[];
 };
 
 export type CreateMethodParams = AppClientMethodParams & {
@@ -23,6 +34,20 @@ export type MethodExecutionResult = {
   txIDs: string[];
   methodResults: algosdk.ABIResult[];
 };
+
+export type MethodCallResult<TReturn = unknown> = {
+  result: MethodExecutionResult;
+  returnValue: TReturn;
+};
+
+export type CreateMethodCallResult<TReturn = unknown> = {
+  appId: bigint;
+  appAddress: algosdk.Address;
+  result: MethodExecutionResult;
+  returnValue: TReturn;
+};
+
+export type MethodReturnValue<T = unknown> = T;
 
 export interface ARC56AppClientParams {
   arc56: ARC56Contract;
@@ -65,10 +90,9 @@ export class ARC56AppClient {
   private async executeWithErrorParsing(composer: Composer) {
     try {
       return await composer.execute(this.algod);
-    } catch (e: any) {
-      const str = e?.message
-        ? `${e.message} ${JSON.stringify(e)}`
-        : JSON.stringify(e);
+    } catch (e: unknown) {
+      const eMsg = e instanceof Error ? e.message : "";
+      const str = eMsg ? `${eMsg} ${JSON.stringify(e)}` : JSON.stringify(e);
       const txId =
         str.match(/(?:transaction\s+)(\S+?)(?=:|\s)/)?.[1] ??
         str.match(/(?<=transaction\s+)\S+(?=:)/)?.[0];
@@ -162,13 +186,13 @@ export class ARC56AppClient {
     return Math.max(bytecblockOffset ?? 0, intcblockOffset ?? 0);
   }
 
-  private getABITypeFromStructFields(structFields: any): string {
-    const typesArray: any[] = [];
+  private getABITypeFromStructFields(structFields: StructDef): string {
+    const typesArray: unknown[] = [];
 
     if (Array.isArray(structFields)) {
       for (const field of structFields) {
         const val = field.type;
-        if (Array.isArray(val) || (typeof val === "object" && val !== null)) {
+        if (Array.isArray(val)) {
           typesArray.push(this.getABITypeFromStructFields(val));
         } else if (
           typeof val === "string" &&
@@ -180,10 +204,9 @@ export class ARC56AppClient {
           typesArray.push(val);
         }
       }
-    } else {
-      for (const key in structFields) {
-        const val = structFields[key];
-        if (typeof val === "object" && val !== null && !Array.isArray(val)) {
+    } else if (typeof structFields === "object") {
+      for (const [, val] of Object.entries(structFields)) {
+        if (typeof val === "object") {
           typesArray.push(this.getABITypeFromStructFields(val));
         } else if (
           typeof val === "string" &&
@@ -211,7 +234,7 @@ export class ARC56AppClient {
     return type;
   }
 
-  private getABIEncodedValue(value: any, type: string): Uint8Array {
+  private getABIEncodedValue(value: unknown, type: string): Uint8Array {
     if (type === "bytes" || type === "AVMBytes") {
       if (typeof value === "string") {
         return new TextEncoder().encode(value);
@@ -219,16 +242,30 @@ export class ARC56AppClient {
       if (value instanceof Uint8Array) {
         return value;
       }
-      return new Uint8Array(value);
+      if (ArrayBuffer.isView(value) || Array.isArray(value)) {
+        return new Uint8Array(value as ArrayLike<number>);
+      }
+      return new Uint8Array();
     }
     if (type === "AVMString") {
       if (typeof value === "string") {
         return new TextEncoder().encode(value);
       }
-      return new Uint8Array(value);
+      if (value instanceof Uint8Array) {
+        return value;
+      }
+      if (ArrayBuffer.isView(value) || Array.isArray(value)) {
+        return new Uint8Array(value as ArrayLike<number>);
+      }
+      return new Uint8Array();
     }
     if (type === "AVMUint64") {
-      const uintVal = typeof value === "bigint" ? value : BigInt(value);
+      const uintVal =
+        typeof value === "bigint"
+          ? value
+          : typeof value === "number" || typeof value === "string"
+            ? BigInt(value)
+            : 0n;
       return algosdk.encodeUint64(uintVal);
     }
 
@@ -237,18 +274,22 @@ export class ARC56AppClient {
   }
 
   private getObjectFromStructFieldsAndArray(
-    structFields: any,
-    valuesArray: any[],
-  ): any {
-    const obj: any = {};
+    structFields: StructDef,
+    valuesArray: unknown[],
+  ): Record<string, unknown> {
+    const obj: Record<string, unknown> = {};
     const arr = [...valuesArray];
 
     if (Array.isArray(structFields)) {
       for (const field of structFields) {
         const key = field.name;
         const val = field.type;
-        if (Array.isArray(val) || (typeof val === "object" && val !== null)) {
-          obj[key] = this.getObjectFromStructFieldsAndArray(val, arr.shift());
+        const nextVal = arr.shift();
+        if (Array.isArray(val)) {
+          obj[key] = this.getObjectFromStructFieldsAndArray(
+            val,
+            Array.isArray(nextVal) ? nextVal : [],
+          );
         } else if (
           typeof val === "string" &&
           this.arc56.structs &&
@@ -256,17 +297,20 @@ export class ARC56AppClient {
         ) {
           obj[key] = this.getObjectFromStructFieldsAndArray(
             this.arc56.structs[val],
-            arr.shift(),
+            Array.isArray(nextVal) ? nextVal : [],
           );
         } else {
-          obj[key] = arr.shift();
+          obj[key] = nextVal;
         }
       }
-    } else {
-      for (const key in structFields) {
-        const val = structFields[key];
-        if (typeof val === "object" && val !== null && !Array.isArray(val)) {
-          obj[key] = this.getObjectFromStructFieldsAndArray(val, arr.shift());
+    } else if (typeof structFields === "object") {
+      for (const [key, val] of Object.entries(structFields)) {
+        const nextVal = arr.shift();
+        if (typeof val === "object") {
+          obj[key] = this.getObjectFromStructFieldsAndArray(
+            val,
+            Array.isArray(nextVal) ? nextVal : [],
+          );
         } else if (
           typeof val === "string" &&
           this.arc56.structs &&
@@ -274,10 +318,10 @@ export class ARC56AppClient {
         ) {
           obj[key] = this.getObjectFromStructFieldsAndArray(
             this.arc56.structs[val],
-            arr.shift(),
+            Array.isArray(nextVal) ? nextVal : [],
           );
         } else {
-          obj[key] = arr.shift();
+          obj[key] = nextVal;
         }
       }
     }
@@ -286,7 +330,7 @@ export class ARC56AppClient {
   }
 
   /** Get the typescript value, which may be the ABIValue or the struct */
-  private getTypeScriptValue(type: string, value: Uint8Array): any {
+  private getTypeScriptValue(type: string, value: Uint8Array): unknown {
     if (type === "bytes" || type === "AVMString") {
       return new TextDecoder().decode(value);
     }
@@ -303,7 +347,7 @@ export class ARC56AppClient {
     if (this.arc56.structs && this.arc56.structs[type]) {
       return this.getObjectFromStructFieldsAndArray(
         this.arc56.structs[type],
-        abiValue as algosdk.ABIValue[],
+        Array.isArray(abiValue) ? abiValue : [abiValue],
       );
     }
 
@@ -326,7 +370,7 @@ export class ARC56AppClient {
     address: string,
     b64Key: string,
     type: string,
-  ): Promise<any> {
+  ): Promise<unknown> {
     const result = await this.algod
       .accountApplicationInformation(address, this.appId)
       .do();
@@ -360,7 +404,7 @@ export class ARC56AppClient {
     }
   }
 
-  private async getBoxValue(b64Key: string, type: string): Promise<any> {
+  private async getBoxValue(b64Key: string, type: string): Promise<unknown> {
     const boxName = new Uint8Array(Buffer.from(b64Key, "base64"));
     const result = await this.algod
       .getApplicationBoxByName(this.appId, boxName)
@@ -376,7 +420,7 @@ export class ARC56AppClient {
   private async getGlobalStateValue(
     b64Key: string,
     type: string,
-  ): Promise<any> {
+  ): Promise<unknown> {
     const result = await this.algod.getApplicationByID(this.appId).do();
 
     const globalState = result.params?.globalState ?? [];
@@ -409,18 +453,19 @@ export class ARC56AppClient {
   }
 
   private getABIValuesFromStructFieldsAndObject(
-    structFields: any,
-    obj: any,
+    structFields: StructDef,
+    obj: unknown,
   ): algosdk.ABIValue[] {
-    const valuesArray: any[] = [];
+    const valuesArray: algosdk.ABIValue[] = [];
 
     if (Array.isArray(structFields)) {
       for (const field of structFields) {
         const key = field.name;
         const val = field.type;
-        if (Array.isArray(val) || (typeof val === "object" && val !== null)) {
+        const prop = isRecord(obj) ? obj[key] : undefined;
+        if (Array.isArray(val)) {
           valuesArray.push(
-            this.getABIValuesFromStructFieldsAndObject(val, obj[key]),
+            this.getABIValuesFromStructFieldsAndObject(val, prop),
           );
         } else if (
           typeof val === "string" &&
@@ -430,19 +475,19 @@ export class ARC56AppClient {
           valuesArray.push(
             this.getABIValuesFromStructFieldsAndObject(
               this.arc56.structs[val],
-              obj[key],
+              prop,
             ),
           );
         } else {
-          valuesArray.push(obj[key]);
+          valuesArray.push(prop as algosdk.ABIValue);
         }
       }
-    } else {
-      for (const key in structFields) {
-        const val = structFields[key];
-        if (typeof val === "object" && val !== null && !Array.isArray(val)) {
+    } else if (typeof structFields === "object") {
+      for (const [key, val] of Object.entries(structFields)) {
+        const prop = isRecord(obj) ? obj[key] : undefined;
+        if (typeof val === "object") {
           valuesArray.push(
-            this.getABIValuesFromStructFieldsAndObject(val, obj[key]),
+            this.getABIValuesFromStructFieldsAndObject(val, prop),
           );
         } else if (
           typeof val === "string" &&
@@ -452,11 +497,11 @@ export class ARC56AppClient {
           valuesArray.push(
             this.getABIValuesFromStructFieldsAndObject(
               this.arc56.structs[val],
-              obj[key],
+              prop,
             ),
           );
         } else {
-          valuesArray.push(obj[key]);
+          valuesArray.push(prop as algosdk.ABIValue);
         }
       }
     }
@@ -464,14 +509,14 @@ export class ARC56AppClient {
     return valuesArray;
   }
 
-  private getABIValue(type: string, value: any): algosdk.ABIValue {
+  private getABIValue(type: string, value: unknown): algosdk.ABIValue {
     if (
       type === "bytes" ||
       type === "AVMBytes" ||
       type === "AVMString" ||
       type === "AVMUint64"
     ) {
-      return value;
+      return value as algosdk.ABIValue;
     }
     if (this.arc56.structs && this.arc56.structs[type]) {
       return this.getABIValuesFromStructFieldsAndObject(
@@ -480,7 +525,7 @@ export class ARC56AppClient {
       );
     }
 
-    return value;
+    return value as algosdk.ABIValue;
   }
 
   async compileProgram(
@@ -591,7 +636,7 @@ export class ARC56AppClient {
     const rawArgs = methodParams?.methodArgs ?? [];
     const encodedArgs = rawArgs.map((a, i) => {
       const argDef = arc56Method.args[i];
-      if (!argDef) return a;
+      if (!argDef) return a as algosdk.ABIValue;
       return this.getABIValue(argDef.struct ?? argDef.type, a);
     });
 
@@ -637,11 +682,11 @@ export class ARC56AppClient {
     };
   }
 
-  private async callWithOC(
+  private async callWithOC<TReturn = unknown>(
     methodName: string,
     onComplete: algosdk.OnApplicationComplete,
     methodParams: AppClientMethodParams = {},
-  ) {
+  ): Promise<MethodCallResult<TReturn>> {
     const callOrCreate = this.appId === 0n ? "create" : "call";
 
     const composer = this.composer();
@@ -651,7 +696,14 @@ export class ARC56AppClient {
       onComplete,
     });
 
-    const ocStrings = [
+    const ocStrings: Array<
+      | "NoOp"
+      | "OptIn"
+      | "CloseOut"
+      | "ClearState"
+      | "UpdateApplication"
+      | "DeleteApplication"
+    > = [
       "NoOp",
       "OptIn",
       "CloseOut",
@@ -667,15 +719,16 @@ export class ARC56AppClient {
       );
     }
 
-    if (!method.actions[callOrCreate].includes(ocStrings[onComplete] as any)) {
-      throw Error(
-        `${ocStrings[onComplete]} is not supported for ${methodName}`,
-      );
+    const ocString = ocStrings[onComplete] ?? "NoOp";
+    if (
+      !(method.actions[callOrCreate] as readonly string[]).includes(ocString)
+    ) {
+      throw Error(`${ocString} is not supported for ${methodName}`);
     }
 
     const result = await this.executeWithErrorParsing(composer);
 
-    let returnValue: any = undefined;
+    let returnValue: unknown = undefined;
 
     if (method.returns.struct ?? method.returns.type !== "void") {
       const lastRes = result.methodResults.at(-1);
@@ -688,80 +741,80 @@ export class ARC56AppClient {
     }
     return {
       result,
-      returnValue,
+      returnValue: returnValue as TReturn,
     };
   }
 
-  async methodCall(
+  async methodCall<TReturn = unknown>(
     methodName: string,
     methodParams: AppClientMethodParams = {},
-  ) {
-    return await this.callWithOC(
+  ): Promise<MethodCallResult<TReturn>> {
+    return await this.callWithOC<TReturn>(
       methodName,
       algosdk.OnApplicationComplete.NoOpOC,
       methodParams,
     );
   }
 
-  async optInMethodCall(
+  async optInMethodCall<TReturn = unknown>(
     methodName: string,
     methodParams: AppClientMethodParams = {},
-  ) {
-    return await this.callWithOC(
+  ): Promise<MethodCallResult<TReturn>> {
+    return await this.callWithOC<TReturn>(
       methodName,
       algosdk.OnApplicationComplete.OptInOC,
       methodParams,
     );
   }
 
-  async updateMethodCall(
+  async updateMethodCall<TReturn = unknown>(
     methodName: string,
     methodParams: AppClientMethodParams = {},
-  ) {
-    return await this.callWithOC(
+  ): Promise<MethodCallResult<TReturn>> {
+    return await this.callWithOC<TReturn>(
       methodName,
       algosdk.OnApplicationComplete.UpdateApplicationOC,
       methodParams,
     );
   }
 
-  async deleteMethodCall(
+  async deleteMethodCall<TReturn = unknown>(
     methodName: string,
     methodParams: AppClientMethodParams = {},
-  ) {
-    return await this.callWithOC(
+  ): Promise<MethodCallResult<TReturn>> {
+    return await this.callWithOC<TReturn>(
       methodName,
       algosdk.OnApplicationComplete.DeleteApplicationOC,
       methodParams,
     );
   }
 
-  async closeOutMethodCall(
+  async closeOutMethodCall<TReturn = unknown>(
     methodName: string,
     methodParams: AppClientMethodParams = {},
-  ) {
-    return await this.callWithOC(
+  ): Promise<MethodCallResult<TReturn>> {
+    return await this.callWithOC<TReturn>(
       methodName,
       algosdk.OnApplicationComplete.CloseOutOC,
       methodParams,
     );
   }
 
-  async clearStateMethodCall(
+  async clearStateMethodCall<TReturn = unknown>(
     methodName: string,
     methodParams: AppClientMethodParams = {},
-  ) {
-    return await this.callWithOC(
+  ): Promise<MethodCallResult<TReturn>> {
+    return await this.callWithOC<TReturn>(
       methodName,
       algosdk.OnApplicationComplete.ClearStateOC,
       methodParams,
     );
   }
 
-  async createMethodCall(
+  async createMethodCall<TReturn = unknown>(
     methodName: string,
     methodParams: CreateMethodParams = {},
-  ) {
+  ): Promise<CreateMethodCallResult<TReturn>> {
     if (this.appId !== 0n) {
       throw Error(
         `Create was called but the app has already been created: ${this.appId.toString()}`,
@@ -798,7 +851,7 @@ export class ARC56AppClient {
       clearProgram,
     };
 
-    const result = await this.callWithOC(
+    const result = await this.callWithOC<TReturn>(
       methodName,
       methodParams.onComplete ?? algosdk.OnApplicationComplete.NoOpOC,
       params,
@@ -820,15 +873,15 @@ export class ARC56AppClient {
   }
 
   getState = {
-    key: async (
+    key: async <T = unknown>(
       key: string,
       address?: string | algosdk.Address | AddressWithTransactionSigner,
-    ): Promise<any> => {
+    ): Promise<T> => {
       if (this.arc56.state?.keys?.global?.[key]) {
-        return await this.getGlobalStateValue(
+        return (await this.getGlobalStateValue(
           this.arc56.state.keys.global[key].key,
           this.arc56.state.keys.global[key].valueType,
-        );
+        )) as T;
       }
 
       if (this.arc56.state?.keys?.local?.[key]) {
@@ -838,29 +891,29 @@ export class ARC56AppClient {
           );
         }
         const addr = this.resolveAddress(address);
-        return await this.getLocalStateValue(
+        return (await this.getLocalStateValue(
           addr,
           this.arc56.state.keys.local[key].key,
           this.arc56.state.keys.local[key].valueType,
-        );
+        )) as T;
       }
 
       if (this.arc56.state?.keys?.box?.[key]) {
-        return await this.getBoxValue(
+        return (await this.getBoxValue(
           this.arc56.state.keys.box[key].key,
           this.arc56.state.keys.box[key].valueType,
-        );
+        )) as T;
       }
 
       throw new Error(`Key ${key} not found in ${this.arc56.name} state`);
     },
 
     map: {
-      value: async (
+      value: async <T = unknown>(
         mapName: string,
-        key: any,
+        key: unknown,
         address?: string | algosdk.Address | AddressWithTransactionSigner,
-      ): Promise<any> => {
+      ): Promise<T> => {
         let mapObject: StorageMap | undefined;
 
         if (this.arc56.state?.maps?.global?.[mapName]) {
@@ -885,7 +938,10 @@ export class ARC56AppClient {
         const b64Key = Buffer.from(encodedKey).toString("base64");
 
         if (this.arc56.state?.maps?.global?.[mapName]) {
-          return await this.getGlobalStateValue(b64Key, mapObject.valueType);
+          return (await this.getGlobalStateValue(
+            b64Key,
+            mapObject.valueType,
+          )) as T;
         }
 
         if (this.arc56.state?.maps?.local?.[mapName]) {
@@ -895,31 +951,36 @@ export class ARC56AppClient {
             );
           }
           const addr = this.resolveAddress(address);
-          return await this.getLocalStateValue(
+          return (await this.getLocalStateValue(
             addr,
             b64Key,
             mapObject.valueType,
-          );
+          )) as T;
         }
 
         if (this.arc56.state?.maps?.box?.[mapName]) {
-          return await this.getBoxValue(b64Key, mapObject.valueType);
+          return (await this.getBoxValue(b64Key, mapObject.valueType)) as T;
         }
+
+        throw new Error(`Map ${mapName} not found in ${this.arc56.name} state`);
       },
     },
   };
 
-  decodeMethodReturnValue(methodName: string, rawValue: Uint8Array): any {
+  decodeMethodReturnValue<T = unknown>(
+    methodName: string,
+    rawValue: Uint8Array,
+  ): MethodReturnValue<T> {
     const method = this.arc56.methods.find((m) => m.name === methodName);
     if (!method) {
       throw new Error(`Method ${methodName} not found in ${this.arc56.name}`);
     }
     if (method.returns.type === "void" || rawValue.length === 0) {
-      return undefined;
+      return undefined as T;
     }
     return this.getTypeScriptValue(
       method.returns.struct ?? method.returns.type,
       rawValue,
-    );
+    ) as T;
   }
 }

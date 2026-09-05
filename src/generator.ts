@@ -43,7 +43,9 @@ export class ARC56Generator {
       .replaceAll(")", "]");
   }
 
-  private structDefToTsType(def: StructField[] | StructFields | string): string {
+  private structDefToTsType(
+    def: StructField[] | StructFields | string,
+  ): string {
     if (Array.isArray(def)) {
       const fields = def.map((f: StructField) => {
         const fieldType = Array.isArray(f.type)
@@ -121,9 +123,10 @@ export class ARC56Generator {
       pushType(m.returns.type);
     });
 
-    if (this.arc56.state?.keys) {
+    const stateKeys = this.arc56.state?.keys;
+    if (stateKeys) {
       (["global", "local", "box"] as const).forEach((storageType) => {
-        const keysObj = this.arc56.state.keys[storageType] ?? {};
+        const keysObj = stateKeys[storageType] ?? {};
         Object.values(keysObj).forEach((k) => {
           pushType(k.keyType);
           pushType(k.valueType);
@@ -131,9 +134,10 @@ export class ARC56Generator {
       });
     }
 
-    if (this.arc56.state?.maps) {
+    const stateMaps = this.arc56.state?.maps;
+    if (stateMaps) {
       (["global", "local", "box"] as const).forEach((storageType) => {
-        const mapsObj = this.arc56.state.maps[storageType] ?? {};
+        const mapsObj = stateMaps[storageType] ?? {};
         Object.values(mapsObj).forEach((m) => {
           pushType(m.keyType);
           pushType(m.valueType);
@@ -196,17 +200,21 @@ export class ARC56Generator {
   }
 
   getStructTypeLines(): string[] {
-    if (!this.arc56.structs || Object.keys(this.arc56.structs).length === 0) {
+    const structs = this.arc56.structs;
+    if (!structs || Object.keys(structs).length === 0) {
       return [];
     }
 
-    const structLines = Object.keys(this.arc56.structs)
+    const structLines = Object.keys(structs)
       .filter((structName) => !structName.includes(" "))
       .map((structName) => {
         const cleanName = structName.split(".").at(-1) ?? "";
-        const tsBody = this.structDefToTsType(this.arc56.structs[structName]);
+        const structDef = structs[structName];
+        if (!structDef) return "";
+        const tsBody = this.structDefToTsType(structDef);
         return `export type ${cleanName} = ${tsBody};`;
-      });
+      })
+      .filter((line) => line !== "");
 
     if (structLines.length === 0) return [];
     return ["// Type definitions for ARC56 structs"].concat(structLines);
@@ -404,10 +412,11 @@ export class ARC56Generator {
 
     const lines = ["state = {"];
 
-    if (hasKeys && this.arc56.state.keys) {
+    const stateKeys = this.arc56.state.keys;
+    if (hasKeys && stateKeys) {
       lines.push("keys: {");
       (["global", "local", "box"] as const).forEach((storageType) => {
-        const keysObj = this.arc56.state.keys[storageType] ?? {};
+        const keysObj = stateKeys[storageType] ?? {};
         Object.keys(keysObj).forEach((name) => {
           const k = keysObj[name];
           if (!k) return;
@@ -426,10 +435,11 @@ export class ARC56Generator {
       lines.push("},");
     }
 
-    if (hasMaps && this.arc56.state.maps) {
+    const stateMaps = this.arc56.state.maps;
+    if (hasMaps && stateMaps) {
       lines.push("maps: {");
       (["global", "local", "box"] as const).forEach((storageType) => {
-        const mapsObj = this.arc56.state.maps[storageType] ?? {};
+        const mapsObj = stateMaps[storageType] ?? {};
         Object.keys(mapsObj).forEach((name) => {
           const m = mapsObj[name];
           if (!m) return;
