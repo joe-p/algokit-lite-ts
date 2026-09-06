@@ -17,7 +17,7 @@
         "typescript-eslint": "^8.69.0",
       },
       "peerDependencies": {
-        "typescript": "npm:@typescript/typescript6@^7.0.2",
+        "algosdk": "^3.7.0",
       },
     },
   },

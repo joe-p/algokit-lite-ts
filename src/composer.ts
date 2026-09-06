@@ -15,6 +15,12 @@ import {
 } from "./arc56_utils";
 
 const USAGE_SCALE = 1_000_000n;
+export const BASE_USAGE = 1_000_000n;
+
+// Equivalent to protocol FeeForUsage(usage, minFee, 0): the fee that a given
+// amount of usage (groupUsage units) is charged.
+const feeForUsage = (usage: bigint, minFee: bigint): bigint =>
+  (usage * minFee + USAGE_SCALE - 1n) / USAGE_SCALE;
 
 type ParamOverrides = {
   suggestedParams?: SuggestedParams;
@@ -26,6 +32,12 @@ type ParamOverrides = {
    * for the transaction that covers them.
    */
   staticFee?: bigint;
+  /**
+   * Let this transaction's fee rise to cover up to this much group usage, so it
+   * can pay for other transactions in the group that pay nothing themselves.
+   * One transaction's worth of usage is `BASE_USAGE`.
+   */
+  maxUsage?: bigint;
 };
 
 type OverriddenParams = Pick<
@@ -37,7 +49,7 @@ type Params<SDKMethod extends (...args: never[]) => unknown> = Omit<
   Parameters<SDKMethod>[0],
   "suggestedParams" | "sender" | "signer"
 > &
-  ParamOverrides & { maxFee?: bigint };
+  ParamOverrides;
 
 type AppIdParams =
   | { appID: number | bigint; appId?: number | bigint }
@@ -54,7 +66,6 @@ export type ARC56MethodParams = BaseMethodParams & {
   arc56: ARC56Contract;
   method: algosdk.ABIMethod | string;
   methodArgs?: unknown[];
-  maxFee?: bigint;
 };
 
 export type StandardMethodParams = BaseMethodParams & {
@@ -85,6 +96,15 @@ export type TransactionParams =
   | { appCreate: AppCreateParams }
   | { txn: algosdk.TransactionWithSigner };
 
+/** The overridable params of a transaction this composer builds itself */
+function paramOverridesOf(
+  p: Exclude<TransactionParams, { txn: algosdk.TransactionWithSigner }>,
+): ParamOverrides {
+  if ("pay" in p) return p.pay;
+  if ("appCreate" in p) return p.appCreate;
+  return p.method;
+}
+
 export interface MethodResult<TReturn = unknown> extends Omit<
   algosdk.ABIResult,
   "returnValue"
@@ -105,7 +125,7 @@ export interface ComposerExecuteResult<TReturns extends unknown[] = unknown[]> {
 export class Composer<TReturns extends unknown[] = []> {
   private atc: AtomicTransactionComposer = new AtomicTransactionComposer();
   private pendingParams: TransactionParams[] = [];
-  private txnInfoByIndex = new Map<number, { maxFee?: bigint }>();
+  private txnInfoByIndex = new Map<number, { maxUsage?: bigint }>();
 
   /**
    * Called once per transaction that does not carry its own suggestedParams.
@@ -199,15 +219,19 @@ export class Composer<TReturns extends unknown[] = []> {
   }
 
   private async simulateForInfo(algod: Algodv2) {
+    const minFee = (await algod.getTransactionParams().do()).minFee;
     const simAtc = this.atc.clone();
     const simTxns = simAtc.buildGroup().map((t) => t.txn);
     let addedFees = 0n;
 
     for (const [i, txn] of simTxns.entries()) {
-      const maxFee = this.txnInfoByIndex.get(i)?.maxFee;
-      if (maxFee && maxFee > txn.fee) {
-        addedFees += maxFee - txn.fee;
-        txn.fee = maxFee;
+      const maxUsage = this.txnInfoByIndex.get(i)?.maxUsage;
+      if (maxUsage) {
+        const maxFee = feeForUsage(maxUsage, minFee);
+        if (maxFee > txn.fee) {
+          addedFees += maxFee - txn.fee;
+          txn.fee = maxFee;
+        }
       }
     }
 
@@ -234,21 +258,22 @@ export class Composer<TReturns extends unknown[] = []> {
 
     const usage = BigInt(groupUsage ?? 0);
     const paid = BigInt(groupFeesPaid ?? 0) - addedFees;
-    const minFee = (await algod.getTransactionParams().do()).minFee;
 
-    // Equivalent to protocol FeeForUsage(groupUsage, 1e6, 0).
-    const requiredFees = (usage * minFee + USAGE_SCALE - 1n) / USAGE_SCALE;
+    const requiredFees = feeForUsage(usage, minFee);
     let feeNeeded = requiredFees > paid ? requiredFees - paid : 0n;
     if (feeNeeded === 0n) return;
 
     const txns = this.atc.buildGroup().map((t) => t.txn);
     for (const [i, txn] of txns.entries()) {
-      const maxFee = this.txnInfoByIndex.get(i)?.maxFee;
-      if (maxFee && maxFee > txn.fee) {
-        const maxAddable = maxFee - txn.fee;
-        const amountToAdd = feeNeeded < maxAddable ? feeNeeded : maxAddable;
-        txn.fee += amountToAdd;
-        feeNeeded -= amountToAdd;
+      const maxUsage = this.txnInfoByIndex.get(i)?.maxUsage;
+      if (maxUsage) {
+        const maxFee = feeForUsage(maxUsage, minFee);
+        if (maxFee > txn.fee) {
+          const maxAddable = maxFee - txn.fee;
+          const amountToAdd = feeNeeded < maxAddable ? feeNeeded : maxAddable;
+          txn.fee += amountToAdd;
+          feeNeeded -= amountToAdd;
+        }
       }
 
       if (feeNeeded === 0n) break;
@@ -263,8 +288,12 @@ export class Composer<TReturns extends unknown[] = []> {
     const { atc } = this;
     for (const p of this.pendingParams) {
       if ("txn" in p) {
+        // Already built, so its fee is fixed and cannot cover anything else
         atc.addTransaction(p.txn);
-      } else if ("pay" in p) {
+        continue;
+      }
+
+      if ("pay" in p) {
         const sdkParams = await this.getSdkParams(p.pay);
         const txn = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
           ...p.pay,
@@ -280,9 +309,6 @@ export class Composer<TReturns extends unknown[] = []> {
         });
 
         atc.addTransaction({ txn, signer: sdkParams.signer });
-        this.txnInfoByIndex.set(atc.count() - 1, {
-          maxFee: p.appCreate.maxFee,
-        });
       } else if ("method" in p) {
         const { arc56, appId, ...rawMethodParams } = p.method;
         const sdkParams = await this.getSdkParams(p.method);
@@ -339,9 +365,6 @@ export class Composer<TReturns extends unknown[] = []> {
             ...(appForeignApps !== undefined ? { appForeignApps } : {}),
             ...(appForeignAssets !== undefined ? { appForeignAssets } : {}),
           });
-          this.txnInfoByIndex.set(atc.count() - 1, {
-            maxFee: p.method.maxFee,
-          });
         } else {
           if (typeof p.method.method === "string") {
             throw new Error(
@@ -357,6 +380,12 @@ export class Composer<TReturns extends unknown[] = []> {
           });
         }
       } else throw Error("Unsupported transaction params");
+
+      // A method call appends its transaction arguments ahead of its own
+      // transaction, so the last one added is always this param's own
+      this.txnInfoByIndex.set(atc.count() - 1, {
+        maxUsage: paramOverridesOf(p).maxUsage,
+      });
     }
   }
 

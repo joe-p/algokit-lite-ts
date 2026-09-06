@@ -417,7 +417,7 @@ describe("Composer ARC56", () => {
     expect(getTxn(txns, 1).txn.fee).toBe(5_000n);
   });
 
-  it("should cover a zero-fee transaction with a capped maxFee", async () => {
+  it("should cover a zero-fee transaction with a capped maxUsage", async () => {
     const composer = new Composer({
       getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
       algod: localnet.algod,
@@ -435,7 +435,7 @@ describe("Composer ARC56", () => {
         appID: appId,
         method: "foo",
         sender,
-        maxFee: 3_000n,
+        maxUsage: 3_000_000n,
         methodArgs: [{ add: { a: 1n, b: 2n }, subtract: { a: 10n, b: 5n } }],
       })
       .buildGroup();
