@@ -2,6 +2,7 @@ import algosdk, {
   Algodv2,
   AtomicTransactionComposer,
   AtomicTransactionComposerStatus,
+  SignedTransaction,
   type AddressWithTransactionSigner,
   type SuggestedParams,
   type TransactionSigner,
@@ -12,6 +13,8 @@ import {
   encodeMethodArgs,
   getAbiMethod,
 } from "./arc56_utils";
+
+const USAGE_SCALE = 1_000_000n;
 
 type ParamOverrides = {
   suggestedParams?: SuggestedParams;
@@ -34,7 +37,7 @@ type Params<SDKMethod extends (...args: never[]) => unknown> = Omit<
   Parameters<SDKMethod>[0],
   "suggestedParams" | "sender" | "signer"
 > &
-  ParamOverrides;
+  ParamOverrides & { maxFee?: bigint };
 
 type AppIdParams =
   | { appID: number | bigint; appId?: number | bigint }
@@ -51,6 +54,7 @@ export type ARC56MethodParams = BaseMethodParams & {
   arc56: ARC56Contract;
   method: algosdk.ABIMethod | string;
   methodArgs?: unknown[];
+  maxFee?: bigint;
 };
 
 export type StandardMethodParams = BaseMethodParams & {
@@ -101,6 +105,7 @@ export interface ComposerExecuteResult<TReturns extends unknown[] = unknown[]> {
 export class Composer<TReturns extends unknown[] = []> {
   private atc: AtomicTransactionComposer = new AtomicTransactionComposer();
   private pendingParams: TransactionParams[] = [];
+  private txnInfoByIndex = new Map<number, { maxFee?: bigint }>();
 
   /**
    * Called once per transaction that does not carry its own suggestedParams.
@@ -108,8 +113,14 @@ export class Composer<TReturns extends unknown[] = []> {
    */
   getSuggestedParams?: () => Promise<SuggestedParams>;
 
-  constructor(opts: { getSuggestedParams?: () => Promise<SuggestedParams> }) {
+  algod?: Algodv2;
+
+  constructor(opts: {
+    getSuggestedParams?: () => Promise<SuggestedParams>;
+    algod?: Algodv2;
+  }) {
     this.getSuggestedParams = opts.getSuggestedParams;
+    this.algod = opts.algod;
   }
 
   private async getSdkParams(
@@ -179,6 +190,74 @@ export class Composer<TReturns extends unknown[] = []> {
     return this as unknown as Composer<[...TReturns, TReturn]>;
   }
 
+  /** (Re)compute the group ID of a group whose transactions were mutated after building */
+  private static regroup(txns: algosdk.Transaction[]) {
+    if (txns.length < 2) return;
+    // The group ID is computed over transactions with an empty group field
+    for (const txn of txns) txn.group = undefined;
+    algosdk.assignGroupID(txns);
+  }
+
+  private async simulateForInfo(algod: Algodv2) {
+    const simAtc = this.atc.clone();
+    const simTxns = simAtc.buildGroup().map((t) => t.txn);
+    let addedFees = 0n;
+
+    for (const [i, txn] of simTxns.entries()) {
+      const maxFee = this.txnInfoByIndex.get(i)?.maxFee;
+      if (maxFee && maxFee > txn.fee) {
+        addedFees += maxFee - txn.fee;
+        txn.fee = maxFee;
+      }
+    }
+
+    Composer.regroup(simTxns);
+
+    const simulateResponse = await algod
+      .simulateTransactions(
+        new algosdk.modelsv2.SimulateRequest({
+          allowEmptySignatures: true,
+          fixSigners: true,
+          txnGroups: [
+            new algosdk.modelsv2.SimulateRequestTransactionGroup({
+              txns: simTxns.map((txn) => new SignedTransaction({ txn })),
+            }),
+          ],
+        }),
+      )
+      .do();
+
+    const groupResponse = simulateResponse.txnGroups[0];
+    if (groupResponse === undefined) throw Error(`TODO`);
+
+    const { groupUsage, groupFeesPaid } = groupResponse;
+
+    const usage = BigInt(groupUsage ?? 0);
+    const paid = BigInt(groupFeesPaid ?? 0) - addedFees;
+    const minFee = (await algod.getTransactionParams().do()).minFee;
+
+    // Equivalent to protocol FeeForUsage(groupUsage, 1e6, 0).
+    const requiredFees = (usage * minFee + USAGE_SCALE - 1n) / USAGE_SCALE;
+    let feeNeeded = requiredFees > paid ? requiredFees - paid : 0n;
+    if (feeNeeded === 0n) return;
+
+    const txns = this.atc.buildGroup().map((t) => t.txn);
+    for (const [i, txn] of txns.entries()) {
+      const maxFee = this.txnInfoByIndex.get(i)?.maxFee;
+      if (maxFee && maxFee > txn.fee) {
+        const maxAddable = maxFee - txn.fee;
+        const amountToAdd = feeNeeded < maxAddable ? feeNeeded : maxAddable;
+        txn.fee += amountToAdd;
+        feeNeeded -= amountToAdd;
+      }
+
+      if (feeNeeded === 0n) break;
+    }
+
+    // Fees changed after the group was built, so the group ID must be recomputed
+    Composer.regroup(txns);
+  }
+
   /** Turn the pending params into transactions on the underlying composer */
   private async innerBuild(): Promise<void> {
     const { atc } = this;
@@ -201,6 +280,9 @@ export class Composer<TReturns extends unknown[] = []> {
         });
 
         atc.addTransaction({ txn, signer: sdkParams.signer });
+        this.txnInfoByIndex.set(atc.count() - 1, {
+          maxFee: p.appCreate.maxFee,
+        });
       } else if ("method" in p) {
         const { arc56, appId, ...rawMethodParams } = p.method;
         const sdkParams = await this.getSdkParams(p.method);
@@ -257,6 +339,9 @@ export class Composer<TReturns extends unknown[] = []> {
             ...(appForeignApps !== undefined ? { appForeignApps } : {}),
             ...(appForeignAssets !== undefined ? { appForeignAssets } : {}),
           });
+          this.txnInfoByIndex.set(atc.count() - 1, {
+            maxFee: p.method.maxFee,
+          });
         } else {
           if (typeof p.method.method === "string") {
             throw new Error(
@@ -281,6 +366,9 @@ export class Composer<TReturns extends unknown[] = []> {
     }
 
     await this.innerBuild();
+    if (this.algod) {
+      await this.simulateForInfo(this.algod);
+    }
 
     return this.atc.buildGroup();
   }

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from "bun:test";
 import algosdk from "algosdk";
 import { Localnet } from "../src/localnet";
 import { ARC56AppClient } from "../src/arc56_client";
-import type { MethodResult } from "../src/composer";
+import { Composer, type MethodResult } from "../src/composer";
 import type { ARC56Contract } from "../src/types/arc56";
 import arc56Json from "./fixtures/ARC56Test.arc56.json";
 
@@ -415,6 +415,41 @@ describe("Composer ARC56", () => {
 
     expect(getTxn(txns, 0).txn.fee).toBe(0n);
     expect(getTxn(txns, 1).txn.fee).toBe(5_000n);
+  });
+
+  it("should cover a zero-fee transaction with a capped maxFee", async () => {
+    const composer = new Composer({
+      getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
+      algod: localnet.algod,
+    });
+
+    const txns = await composer
+      .addPayment({
+        sender,
+        receiver: sender.address,
+        amount: 0n,
+        staticFee: 0n,
+      })
+      .addMethodCall({
+        arc56,
+        appID: appId,
+        method: "foo",
+        sender,
+        maxFee: 3_000n,
+        methodArgs: [{ add: { a: 1n, b: 2n }, subtract: { a: 10n, b: 5n } }],
+      })
+      .buildGroup();
+
+    expect(getTxn(txns, 0).txn.fee).toBe(0n);
+    const fee = getTxn(txns, 1).txn.fee;
+    expect(fee).toBe(2_000n);
+
+    const result = await composer.execute(localnet.algod);
+    expect(result.confirmedRound).toBeGreaterThan(0n);
+    expect(getResult(result, 0).returnValue).toEqual({
+      sum: 3n,
+      difference: 5n,
+    });
   });
 
   it("should let a zero-fee transaction be covered by another transaction's staticFee", async () => {
