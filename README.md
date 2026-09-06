@@ -84,7 +84,7 @@ const resultOfMethodTwo = result.returns[1];
 With Lite, you can use the app client's `params` object to get the parameters to pass to a `Composer`. When calls are chained, the composer tracks each generated method's return type.
 
 ```ts
-const result = await new Composer(...)
+const composer = await new Composer(...)
   .addMethodCall(client.params.methodOne({ args: { arg1: 123 } }))
   .addMethodCall(client.params.methodTwo({ args: { arg1: 'foo' } }))
   .execute(algod)
@@ -93,4 +93,19 @@ const result = await new Composer(...)
 const resultOfMethodOne = result.methodResults[0].returnValue
 // Inferred as the return type of methodTwo
 const resultOfMethodTwo = result.methodResults[1].returnValue
+```
+
+If for some reason you cannot chain the `addMethodCalls` calls with the execute, you can use the exported `${arc56.name}ReturnTypes` from the generated client
+
+```ts
+import { HelloWorldClient, HelloWorldReturnTypes } from "../contracts/clients/HelloWorld";
+
+const composer = await new Composer(...);
+composer.addMethodCall(client.params.methodOne({ args: { arg1: 123 } }));
+composer.addMethodCall(client.params.methodTwo({ args: { arg1: 'foo' } }));
+const result = composer.execute(algod);
+
+// methodResults will be unknown, so we must explicitly use `as`
+const resultOfMethodOne = result.methodResults[0].returnValue as HelloWorldReturnTypes['methodOne']
+const resultOfMethodTwo = result.methodResults[1].returnValue as HelloWorldReturnTypes['methodTwo']
 ```
