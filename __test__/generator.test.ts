@@ -56,7 +56,8 @@ describe("ARC56Generator", () => {
     expect(code).toContain("call = {");
     expect(code).toContain("optIn = {");
     expect(code).toContain("templateVariables: TemplateVariables;");
-    expect(code).toContain("createApplication: async ()");
+    expect(code).toContain("static create = {");
+    expect(code).toContain("createApplication: async (");
 
     // Check state accessors
     expect(code).toContain("state = {");
@@ -105,11 +106,12 @@ describe("ARC56Generator", () => {
     expect(ARC56TestClient).toBeDefined();
 
     // 1. Create app
-    const { appClient, appId, appAddress } = await ARC56TestClient.create({
-      algod: localnet.algod,
-      sender: dispenser,
-      templateVariables: { someNumber: 1337n },
-    }).createApplication();
+    const { appClient, appId, appAddress } =
+      await ARC56TestClient.create.createApplication({
+        algod: localnet.algod,
+        sender: dispenser,
+        templateVariables: { someNumber: 1337n },
+      });
 
     expect(appId).toBeGreaterThan(0n);
     expect(appClient.appId).toBe(appId);
@@ -281,6 +283,6 @@ describe("ARC56Generator", () => {
     );
     expect(code).toContain("hello: async (");
     expect(code).toContain("calculate: async (");
-    expect(code).toContain("static override create(");
+    expect(code).toContain("static create = {");
   });
 });

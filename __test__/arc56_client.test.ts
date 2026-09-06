@@ -14,9 +14,9 @@ describe("ARC56AppClient", () => {
     sender = await localnet.dispenser();
   });
 
-  it("should create an application using static create", async () => {
+  it("should create an application using static createMethodCall", async () => {
     const { appClient, appId, appAddress, result } =
-      await ARC56AppClient.create({
+      await ARC56AppClient.createMethodCall({
         arc56,
         algod: localnet.algod,
         method: "createApplication",
@@ -33,7 +33,7 @@ describe("ARC56AppClient", () => {
   });
 
   it("should call a method with struct inputs and return decoded struct outputs", async () => {
-    const { appClient } = await ARC56AppClient.create({
+    const { appClient } = await ARC56AppClient.createMethodCall({
       arc56,
       algod: localnet.algod,
       method: "createApplication",
@@ -53,7 +53,7 @@ describe("ARC56AppClient", () => {
   });
 
   it("should support calling with a different sender and custom suggestedParams", async () => {
-    const { appClient } = await ARC56AppClient.create({
+    const { appClient } = await ARC56AppClient.createMethodCall({
       arc56,
       algod: localnet.algod,
       method: "createApplication",
@@ -79,7 +79,7 @@ describe("ARC56AppClient", () => {
   });
 
   it("should compose multiple app clients together using Composer and getParams", async () => {
-    const { appClient: appClient1 } = await ARC56AppClient.create({
+    const { appClient: appClient1 } = await ARC56AppClient.createMethodCall({
       arc56,
       algod: localnet.algod,
       method: "createApplication",
@@ -87,7 +87,7 @@ describe("ARC56AppClient", () => {
       templateVariables: { someNumber: 1337n },
     });
 
-    const { appClient: appClient2 } = await ARC56AppClient.create({
+    const { appClient: appClient2 } = await ARC56AppClient.createMethodCall({
       arc56,
       algod: localnet.algod,
       method: "createApplication",
@@ -138,7 +138,7 @@ describe("ARC56AppClient", () => {
   });
 
   it("should parse runtime errors using sourceInfo and provide human-readable messages", async () => {
-    const { appClient } = await ARC56AppClient.create({
+    const { appClient } = await ARC56AppClient.createMethodCall({
       arc56,
       algod: localnet.algod,
       method: "createApplication",
@@ -157,7 +157,7 @@ describe("ARC56AppClient", () => {
   });
 
   it("should read global state keys and maps", async () => {
-    const { appClient } = await ARC56AppClient.create({
+    const { appClient } = await ARC56AppClient.createMethodCall({
       arc56,
       algod: localnet.algod,
       method: "createApplication",
@@ -180,7 +180,7 @@ describe("ARC56AppClient", () => {
   });
 
   it("should support opt-in, boxes, and reading local state & box state", async () => {
-    const { appClient } = await ARC56AppClient.create({
+    const { appClient } = await ARC56AppClient.createMethodCall({
       arc56,
       algod: localnet.algod,
       method: "createApplication",
@@ -256,7 +256,7 @@ describe("ARC56AppClient", () => {
 
     // Mismatched template variables count
     expect(
-      ARC56AppClient.create({
+      ARC56AppClient.createMethodCall({
         arc56,
         algod: localnet.algod,
         method: "createApplication",
@@ -303,7 +303,7 @@ describe("ARC56AppClient", () => {
       },
     };
 
-    const { appClient } = await ARC56AppClient.create({
+    const { appClient } = await ARC56AppClient.createMethodCall({
       arc56: arc56LatestStructs,
       algod: localnet.algod,
       method: "createApplication",
@@ -339,7 +339,7 @@ describe("ARC56AppClient", () => {
       },
     };
 
-    const { appClient } = await ARC56AppClient.create({
+    const { appClient } = await ARC56AppClient.createMethodCall({
       arc56: arc56LatestSourceInfo,
       algod: localnet.algod,
       method: "createApplication",

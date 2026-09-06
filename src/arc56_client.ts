@@ -806,7 +806,7 @@ export class ARC56AppClient {
     );
   }
 
-  static async create<TReturn = unknown>(
+  static async createMethodCall<TReturn = unknown>(
     params: ARC56AppClientCreateParams,
   ): Promise<CreateMethodCallResult<TReturn>> {
     const { arc56, algod, getSuggestedParams, ...methodParams } = params;
@@ -882,12 +882,6 @@ export class ARC56AppClient {
       result: result.result,
       returnValue: result.returnValue,
     };
-  }
-
-  static async createMethodCall<TReturn = unknown>(
-    params: ARC56AppClientCreateParams,
-  ): Promise<CreateMethodCallResult<TReturn>> {
-    return await ARC56AppClient.create<TReturn>(params);
   }
 
   getState = {
