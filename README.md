@@ -2,9 +2,9 @@
 
 This library is a light wrapper around algosdk to make it easier to interact with Algorand. The main features are
 
+- Ergonomic ARC56-compatible transaction group composer
 - ARC56 app client
 - Typed ARC56 app client generator
-- Ergonomic transaction group composer
 - Localnet account generation and funding
 
 ## Why Not Utils?
@@ -92,6 +92,6 @@ const result = new Composer(...)
   .addMethodCall(client.params.methodTwo({ args: { arg1: 'foo' } }))
   .execute()
 
-const resultOfMethodOne = client.decodeMethodReturnValue("methodOne", result.methodResults[0].rawReturnValue);
-const resultOfMethodTwo = client.decodeMethodReturnValue("methodTwo", result.methodResults[1].rawReturnValue);
+const resultOfMethodOne = result.methodResults[0].returnValue as { arg1 number });
+const resultOfMethodTwo = result.methodResults[1].returnValue as { arg1: string });
 ```
