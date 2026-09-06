@@ -62,9 +62,20 @@ describe("ARC56Generator", () => {
     expect(code).toContain('): MethodParams<ARC56TestReturnTypes["foo"]> => {');
     expect(code).toContain("call = {");
     expect(code).toContain("optIn = {");
-    expect(code).toContain("templateVariables: TemplateVariables;");
+    expect(code).toContain("{ templateVariables: TemplateVariables }");
     expect(code).toContain("static create = {");
     expect(code).toContain("createApplication: async (");
+
+    // The ARC56 contract is exported so callers can encode struct values and
+    // template variables against it
+    expect(code).toContain("export const ARC56_JSON =");
+    expect(code).toContain(
+      "export const APP_SPEC = JSON.parse(ARC56_JSON) as ARC56Contract;",
+    );
+
+    // A contract with no bare create actions gets no bare create plumbing
+    expect(code).not.toContain("TypedBareCreateParams");
+    expect(code).not.toContain("bare: async (");
 
     // Check state accessors
     expect(code).toContain("state = {");
@@ -81,6 +92,63 @@ describe("ARC56Generator", () => {
     expect(code).toContain(
       'foo: (rawValue: Uint8Array): ARC56TestReturnTypes["foo"] => {',
     );
+  });
+
+  it("should emit a bare create for contracts with bare create actions", async () => {
+    const bareArc56: ARC56Contract = {
+      ...arc56,
+      bareActions: { create: ["NoOp"], call: [] },
+    };
+
+    const code = await new ARC56Generator(bareArc56).generate();
+
+    expect(code).toContain("type TypedBareCreateParams = Omit<");
+    expect(code).toContain("bare: async (");
+    expect(code).toContain("await ARC56AppClient.bareCreate({");
+    expect(code).toContain("result: BareExecutionResult");
+    // The bare create still takes the contract's template variables
+    expect(code).toContain("{ templateVariables: TemplateVariables }");
+  });
+
+  it("should type byte arrays as Uint8Array", async () => {
+    const byteArc56: ARC56Contract = {
+      ...arc56,
+      structs: {
+        ...arc56.structs,
+        Proof: [
+          { name: "piA", type: "byte[96]" },
+          { name: "ic", type: "byte[96][]" },
+          { name: "blob", type: "byte[]" },
+          { name: "count", type: "uint64" },
+        ],
+      },
+      methods: [
+        ...arc56.methods,
+        {
+          name: "verify",
+          args: [
+            {
+              name: "proof",
+              type: "(byte[96],byte[96][],byte[],uint64)",
+              struct: "Proof",
+            },
+            { name: "digest", type: "byte[32]" },
+          ],
+          returns: { type: "void" },
+          actions: { create: [], call: ["NoOp"] },
+        },
+      ],
+    };
+
+    const code = await new ARC56Generator(byteArc56).generate();
+
+    expect(code).toContain("piA: Uint8Array;");
+    expect(code).toContain("ic: Uint8Array[];");
+    expect(code).toContain("blob: Uint8Array;");
+    expect(code).toContain("count: uint64;");
+    expect(code).toContain("digest: Uint8Array");
+    // No `byte` alias is needed once byte arrays map to Uint8Array
+    expect(code).not.toContain("type byte = string;");
   });
 
   it("should match snapshot for the full generated typed client", async () => {

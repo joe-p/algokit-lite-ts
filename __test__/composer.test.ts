@@ -391,4 +391,114 @@ describe("Composer ARC56", () => {
     expect(appTxn.applicationCall.foreignApps).toEqual([1001n, 1002n]);
     expect(appTxn.applicationCall.foreignAssets).toEqual([2001n, 2002n]);
   });
+
+  it("should set an exact fee with staticFee", async () => {
+    const receiver = await localnet.generateAccount({});
+
+    const txns = await localnet
+      .composer()
+      .addPayment({
+        sender,
+        receiver: receiver.address,
+        amount: 0n,
+        staticFee: 0n,
+      })
+      .addMethodCall({
+        arc56,
+        appID: appId,
+        method: "foo",
+        sender,
+        staticFee: 5_000n,
+        methodArgs: [{ add: { a: 1n, b: 2n }, subtract: { a: 10n, b: 5n } }],
+      })
+      .buildGroup();
+
+    expect(getTxn(txns, 0).txn.fee).toBe(0n);
+    expect(getTxn(txns, 1).txn.fee).toBe(5_000n);
+  });
+
+  it("should let a zero-fee transaction be covered by another transaction's staticFee", async () => {
+    const payer = await localnet.generateAccount({ fund: 10_000_000n });
+
+    const result = await localnet
+      .composer()
+      .addPayment({
+        sender: payer,
+        receiver: payer.address,
+        amount: 0n,
+        staticFee: 0n,
+      })
+      .addPayment({
+        sender: payer,
+        receiver: payer.address,
+        amount: 0n,
+        // Its own fee plus the fee the transaction above did not pay
+        staticFee: 2_000n,
+      })
+      .execute(localnet.algod);
+
+    expect(result.confirmedRound).toBeGreaterThan(0n);
+  });
+
+  it("should accept a pre-built transaction", async () => {
+    const suggestedParams = await localnet.algod.getTransactionParams().do();
+
+    const prebuilt = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+      sender: sender.address,
+      receiver: sender.address,
+      amount: 0n,
+      suggestedParams,
+    });
+
+    const result = await localnet
+      .composer()
+      .addTransaction(prebuilt, sender.txnSigner)
+      .addMethodCall({
+        arc56,
+        appID: appId,
+        method: "foo",
+        sender,
+        methodArgs: [{ add: { a: 1n, b: 2n }, subtract: { a: 10n, b: 5n } }],
+      })
+      .execute(localnet.algod);
+
+    expect(result.txIDs.length).toBe(2);
+    expect(getResult(result, 0).returnValue).toEqual({
+      sum: 3n,
+      difference: 5n,
+    });
+  });
+
+  it("should accept a pre-built TransactionWithSigner", async () => {
+    const suggestedParams = await localnet.algod.getTransactionParams().do();
+
+    const txn = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+      sender: sender.address,
+      receiver: sender.address,
+      amount: 0n,
+      suggestedParams,
+    });
+
+    const result = await localnet
+      .composer()
+      .addTransaction({ txn, signer: sender.txnSigner })
+      .execute(localnet.algod);
+
+    expect(result.txIDs.length).toBe(1);
+  });
+
+  it("should reject a pre-built transaction with no signer", async () => {
+    const suggestedParams = await localnet.algod.getTransactionParams().do();
+
+    const txn = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+      sender: sender.address,
+      receiver: sender.address,
+      amount: 1n,
+      suggestedParams,
+    });
+
+    expect(() => localnet.composer().addTransaction(txn as never)).toThrow(
+      "A TransactionSigner is required",
+    );
+  });
 });

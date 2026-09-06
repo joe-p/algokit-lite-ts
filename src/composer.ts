@@ -17,6 +17,12 @@ type ParamOverrides = {
   suggestedParams?: SuggestedParams;
   sender: AddressWithTransactionSigner;
   signer?: TransactionSigner;
+  /**
+   * Pay exactly this many microAlgos of fee, ignoring the suggested fee. Use it
+   * both for transactions that pay nothing, such as logic signature calls, and
+   * for the transaction that covers them.
+   */
+  staticFee?: bigint;
 };
 
 type OverriddenParams = Pick<
@@ -65,8 +71,15 @@ export type PaymentParams = Params<
   typeof algosdk.makePaymentTxnWithSuggestedParamsFromObject
 >;
 
+export type AppCreateParams = Params<
+  typeof algosdk.makeApplicationCreateTxnFromObject
+>;
+
 export type TransactionParams =
-  { method: MethodParams } | { pay: PaymentParams };
+  | { method: MethodParams }
+  | { pay: PaymentParams }
+  | { appCreate: AppCreateParams }
+  | { txn: algosdk.TransactionWithSigner };
 
 export interface MethodResult<TReturn = unknown> extends Omit<
   algosdk.ABIResult,
@@ -89,6 +102,10 @@ export class Composer<TReturns extends unknown[] = []> {
   private atc: AtomicTransactionComposer = new AtomicTransactionComposer();
   private pendingParams: TransactionParams[] = [];
 
+  /**
+   * Called once per transaction that does not carry its own suggestedParams.
+   * Caching is up to this function.
+   */
   getSuggestedParams?: () => Promise<SuggestedParams>;
 
   constructor(opts: { getSuggestedParams?: () => Promise<SuggestedParams> }) {
@@ -100,12 +117,20 @@ export class Composer<TReturns extends unknown[] = []> {
   ): Promise<OverriddenParams & { signer: TransactionSigner }> {
     const { sender } = params;
 
-    const suggestedParams =
+    let suggestedParams =
       params.suggestedParams ?? (await this.getSuggestedParams?.());
     if (suggestedParams === undefined) {
       throw Error(
         "Transaction missing suggestedParams and this.getSuggestedParams is undefined",
       );
+    }
+
+    if (params.staticFee !== undefined) {
+      suggestedParams = {
+        ...suggestedParams,
+        fee: params.staticFee,
+        flatFee: true,
+      };
     }
 
     return {
@@ -124,6 +149,29 @@ export class Composer<TReturns extends unknown[] = []> {
     return this.add({ pay: params });
   }
 
+  /** Create an application with a bare (non-ABI) call */
+  addAppCreate(params: AppCreateParams) {
+    return this.add({ appCreate: params });
+  }
+
+  /** Add a transaction that has already been built */
+  addTransaction(txn: algosdk.TransactionWithSigner): this;
+  addTransaction(txn: algosdk.Transaction, signer: TransactionSigner): this;
+  addTransaction(
+    txn: algosdk.Transaction | algosdk.TransactionWithSigner,
+    signer?: TransactionSigner,
+  ) {
+    if (algosdk.isTransactionWithSigner(txn)) {
+      return this.add({ txn });
+    }
+    if (signer === undefined) {
+      throw Error(
+        "A TransactionSigner is required when adding a Transaction that has no signer attached",
+      );
+    }
+    return this.add({ txn: { txn, signer } });
+  }
+
   addMethodCall<TReturn>(
     params: MethodParams<TReturn>,
   ): Composer<[...TReturns, TReturn]> {
@@ -131,20 +179,28 @@ export class Composer<TReturns extends unknown[] = []> {
     return this as unknown as Composer<[...TReturns, TReturn]>;
   }
 
-  async buildGroup() {
-    if (this.atc.getStatus() >= AtomicTransactionComposerStatus.BUILT) {
-      return this.atc.buildGroup();
-    }
-
+  /** Turn the pending params into transactions on the underlying composer */
+  private async innerBuild(): Promise<void> {
+    const { atc } = this;
     for (const p of this.pendingParams) {
-      if ("pay" in p) {
+      if ("txn" in p) {
+        atc.addTransaction(p.txn);
+      } else if ("pay" in p) {
         const sdkParams = await this.getSdkParams(p.pay);
         const txn = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
           ...p.pay,
           ...sdkParams,
         });
 
-        this.atc.addTransaction({ txn, signer: sdkParams.signer });
+        atc.addTransaction({ txn, signer: sdkParams.signer });
+      } else if ("appCreate" in p) {
+        const sdkParams = await this.getSdkParams(p.appCreate);
+        const txn = algosdk.makeApplicationCreateTxnFromObject({
+          ...p.appCreate,
+          ...sdkParams,
+        });
+
+        atc.addTransaction({ txn, signer: sdkParams.signer });
       } else if ("method" in p) {
         const { arc56, appId, ...rawMethodParams } = p.method;
         const sdkParams = await this.getSdkParams(p.method);
@@ -190,7 +246,7 @@ export class Composer<TReturns extends unknown[] = []> {
               ? arc56Method.recommendations.assets.map(BigInt)
               : undefined);
 
-          this.atc.addMethodCall({
+          atc.addMethodCall({
             ...rawMethodParams,
             ...sdkParams,
             appID,
@@ -207,7 +263,7 @@ export class Composer<TReturns extends unknown[] = []> {
               "ARC56 definition is required when method is specified as a string",
             );
           }
-          this.atc.addMethodCall({
+          atc.addMethodCall({
             ...rawMethodParams,
             ...sdkParams,
             appID,
@@ -215,8 +271,16 @@ export class Composer<TReturns extends unknown[] = []> {
             methodArgs: p.method.methodArgs,
           });
         }
-      } else throw Error("TODO");
+      } else throw Error("Unsupported transaction params");
     }
+  }
+
+  async buildGroup() {
+    if (this.atc.getStatus() >= AtomicTransactionComposerStatus.BUILT) {
+      return this.atc.buildGroup();
+    }
+
+    await this.innerBuild();
 
     return this.atc.buildGroup();
   }

@@ -56,6 +56,18 @@ const { appClient } = await HelloWorldAppClient.create.createApplication({
 });
 ```
 
+If the contract's `bareActions.create` is non-empty, the generated client also gets a `create.bare` that creates the app without an ABI call.
+
+```ts
+const { appClient, appId } = await HelloWorldClient.create.bare({
+  algod: localnet.algod,
+  sender,
+  templateVariables: { SOME_VALUE: 123n },
+});
+```
+
+The state schema comes from the ARC56 contract, and the number of extra program pages is derived from the compiled program sizes. Pass `numGlobalInts`, `extraPages` and friends to override either.
+
 #### Idempotent Deployer
 
 AlgoKit Utils includes abstractions for idempotent deployment. This feature uses the note field and indexer to find previous deployments of a contract. AlgoKit Lite does not include a similar feature. If you'd like to track previous deployments, you must implement your own way of recording past deployments (on or off chain).

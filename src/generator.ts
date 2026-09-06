@@ -36,6 +36,15 @@ export class ARC56Generator {
       return type;
     }
 
+    // A `byte[N]` (or `byte[]`) is a run of bytes rather than an array of
+    // individual values, so surface it as a Uint8Array. Any further dimensions
+    // are real arrays: `byte[96][]` is a Uint8Array[].
+    const byteArray = type.match(/^byte(?:\[\d*\])((?:\[\d*\])*)$/);
+    if (byteArray) {
+      const outerDimensions = byteArray[1] ?? "";
+      return `Uint8Array${outerDimensions.replace(/\[\d+\]/g, "[]")}`;
+    }
+
     const lastPart = type.split(".").at(-1) ?? "";
     return lastPart
       .replace(/\[\d+\]/g, "[]")
@@ -83,6 +92,9 @@ export class ARC56Generator {
         return;
       }
       if (type.startsWith("{") && type.endsWith("}")) return;
+
+      // Byte arrays become Uint8Array, so they need no alias
+      if (/^byte(?:\[\d*\])+$/.test(type)) return;
 
       // Array type
       if (type.match(/\[\d*\]$/)) {
@@ -369,13 +381,42 @@ export class ARC56Generator {
     const createMethods = this.arc56.methods.filter(
       (m) => m.actions.create.length > 0,
     );
-    if (createMethods.length === 0) return [];
+    const hasBareCreate = (this.arc56.bareActions?.create ?? []).length > 0;
+    if (createMethods.length === 0 && !hasBareCreate) return [];
 
     const hasTemplateVars =
       this.arc56.templateVariables !== undefined &&
       Object.keys(this.arc56.templateVariables).length > 0;
 
+    const clientParams = `{ algod: algosdk.Algodv2; getSuggestedParams?: () => Promise<algosdk.SuggestedParams> }`;
+    const templateVarsParam = hasTemplateVars
+      ? `{ templateVariables: TemplateVariables }`
+      : `{ templateVariables?: Record<string, string | bigint | number | Uint8Array> }`;
+
     lines.push("static create = {");
+
+    if (hasBareCreate) {
+      const bareParamsType = `${clientParams} & TypedBareCreateParams & ${templateVarsParam}`;
+
+      lines.push(
+        `  bare: async (params: ${bareParamsType}): Promise<{ appClient: ${this.arc56.name}Client; result: BareExecutionResult; appId: bigint; appAddress: algosdk.Address }> => {`,
+        `    const { appId, appAddress, result } = await ARC56AppClient.bareCreate({`,
+        `      arc56: APP_SPEC,`,
+        `      ...params,`,
+        `    });`,
+        `    return {`,
+        `      appClient: new ${this.arc56.name}Client({`,
+        `        appId,`,
+        `        algod: params.algod,`,
+        `        getSuggestedParams: params.getSuggestedParams,`,
+        `      }),`,
+        `      appId,`,
+        `      appAddress,`,
+        `      result,`,
+        `    };`,
+        `  },`,
+      );
+    }
 
     createMethods.forEach((m) => {
       const retType = `${this.arc56.name}ReturnTypes["${m.name}"]`;
@@ -389,9 +430,7 @@ export class ARC56Generator {
         ? `TypedCreateMethodParams<${argsType}>`
         : "TypedCreateMethodParams";
 
-      const methodParamsType = hasTemplateVars
-        ? `{ algod: algosdk.Algodv2; getSuggestedParams?: () => Promise<algosdk.SuggestedParams> } & ${typedCreateParams} & { templateVariables: TemplateVariables; onComplete?: algosdk.OnApplicationComplete }`
-        : `{ algod: algosdk.Algodv2; getSuggestedParams?: () => Promise<algosdk.SuggestedParams> } & ${typedCreateParams} & { templateVariables?: Record<string, string | bigint | number | Uint8Array>; onComplete?: algosdk.OnApplicationComplete }`;
+      const methodParamsType = `${clientParams} & ${typedCreateParams} & ${templateVarsParam} & { onComplete?: algosdk.OnApplicationComplete }`;
 
       const methodArgsStr = hasArgs
         ? m.args.map((a, i) => `params.args.${a.name ?? `arg${i}`}`).join(", ")
@@ -400,7 +439,7 @@ export class ARC56Generator {
       lines.push(
         `  ${m.name}: async (params: ${methodParamsType}): Promise<{ appClient: ${this.arc56.name}Client; result: MethodExecutionResult; returnValue: ${retType}; appId: bigint; appAddress: algosdk.Address }> => {`,
         `    const { appId, appAddress, result, returnValue } = await ARC56AppClient.createMethodCall({`,
-        `      arc56: JSON.parse(ARC56_JSON),`,
+        `      arc56: APP_SPEC,`,
         `      method: "${m.name}",`,
         `      ...params,`,
         `      methodArgs: [${methodArgsStr}],`,
@@ -523,18 +562,29 @@ export class ARC56Generator {
     getSuggestedParams?: () => Promise<algosdk.SuggestedParams>;
     arc56?: ARC56Contract;
   }) {
-    super({ arc56: JSON.parse(ARC56_JSON), ...p });
+    super({ arc56: APP_SPEC, ...p });
   }`;
   }
 
   async generate(): Promise<string> {
     const clientImportPath = this.options.clientImportPath ?? "algokit-lite";
+    const hasBareCreate = (this.arc56.bareActions?.create ?? []).length > 0;
+
+    const bareImports = hasBareCreate
+      ? "\n  type BareCreateParams,\n  type BareExecutionResult,"
+      : "";
+    const bareParamsType = hasBareCreate
+      ? `\ntype TypedBareCreateParams = Omit<
+  BareCreateParams,
+  "arc56" | "algod" | "getSuggestedParams" | "templateVariables"
+>;`
+      : "";
 
     const content = `
 import algosdk from "algosdk";
 import {
   ARC56AppClient,
-  type AppClientMethodParams,
+  type AppClientMethodParams,${bareImports}
   type CreateMethodParams,
   type MethodParams,
   type MethodExecutionResult,
@@ -550,9 +600,12 @@ type TypedCreateMethodParams<TArgs = undefined> = Omit<
   CreateMethodParams,
   "method" | "methodArgs"
 > &
-  (TArgs extends undefined ? { args?: undefined } : { args: TArgs });
+  (TArgs extends undefined ? { args?: undefined } : { args: TArgs });${bareParamsType}
 
-const ARC56_JSON = ${JSON.stringify(JSON.stringify(this.arc56))};
+export const ARC56_JSON = ${JSON.stringify(JSON.stringify(this.arc56))};
+
+/** The ARC56 contract this client was generated from */
+export const APP_SPEC = JSON.parse(ARC56_JSON) as ARC56Contract;
 
 ${this.getABITypeLines().join("\n")}
 

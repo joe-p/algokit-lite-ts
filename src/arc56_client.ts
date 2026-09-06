@@ -5,6 +5,7 @@ import algosdk, {
 } from "algosdk";
 import {
   Composer,
+  type AppCreateParams,
   type ARC56MethodParams,
   type MethodParams,
   type MethodResult,
@@ -21,6 +22,41 @@ import {
   type StructDef,
 } from "./arc56_utils";
 
+/** Bytes of program that fit in a single application program page */
+const APP_PAGE_SIZE = 2048;
+
+/**
+ * The number of extra program pages needed to hold both programs. The first
+ * page is free, so a pair of programs totalling one page needs no extras.
+ */
+function requiredExtraPages(
+  approvalProgram: Uint8Array,
+  clearProgram: Uint8Array,
+): number {
+  const pages = Math.ceil(
+    (approvalProgram.length + clearProgram.length) / APP_PAGE_SIZE,
+  );
+
+  return Math.max(pages - 1, 0);
+}
+
+/** ARC56 action names, indexed by their OnApplicationComplete value */
+const ON_COMPLETE_STRINGS: Array<
+  | "NoOp"
+  | "OptIn"
+  | "CloseOut"
+  | "ClearState"
+  | "UpdateApplication"
+  | "DeleteApplication"
+> = [
+  "NoOp",
+  "OptIn",
+  "CloseOut",
+  "ClearState",
+  "UpdateApplication",
+  "DeleteApplication",
+];
+
 export type AppClientMethodParams = Omit<
   ARC56MethodParams,
   "appID" | "appId" | "method" | "sender" | "methodArgs" | "arc56"
@@ -31,6 +67,30 @@ export type AppClientMethodParams = Omit<
 };
 
 export type CreateMethodParams = AppClientMethodParams & {
+  templateVariables?: Record<string, string | bigint | number | Uint8Array>;
+};
+
+/**
+ * Params for creating an app with a bare (non-ABI) call. The programs and the
+ * state schema default to what the ARC56 contract declares.
+ */
+export type BareCreateParams = Omit<
+  AppCreateParams,
+  | "onComplete"
+  | "approvalProgram"
+  | "clearProgram"
+  | "numGlobalByteSlices"
+  | "numGlobalInts"
+  | "numLocalByteSlices"
+  | "numLocalInts"
+> & {
+  onComplete?: algosdk.OnApplicationComplete;
+  approvalProgram?: Uint8Array;
+  clearProgram?: Uint8Array;
+  numGlobalByteSlices?: number;
+  numGlobalInts?: number;
+  numLocalByteSlices?: number;
+  numLocalInts?: number;
   templateVariables?: Record<string, string | bigint | number | Uint8Array>;
 };
 
@@ -53,6 +113,18 @@ export type CreateMethodCallResult<TReturn = unknown> = {
   returnValue: TReturn;
 };
 
+export type BareExecutionResult = {
+  confirmedRound: bigint;
+  txIDs: string[];
+};
+
+export type BareCreateResult = {
+  appClient: ARC56AppClient;
+  appId: bigint;
+  appAddress: algosdk.Address;
+  result: BareExecutionResult;
+};
+
 export type MethodReturnValue<T = unknown> = T;
 
 export interface ARC56AppClientParams {
@@ -64,6 +136,12 @@ export interface ARC56AppClientParams {
 
 export type ARC56AppClientCreateParams = Omit<ARC56AppClientParams, "appId"> &
   CreateMethodParams;
+
+export type ARC56AppClientBareCreateParams = Omit<
+  ARC56AppClientParams,
+  "appId"
+> &
+  BareCreateParams;
 
 export class ARC56AppClient {
   readonly appId: bigint;
@@ -86,14 +164,6 @@ export class ARC56AppClient {
       networks: this.arc56.networks,
     });
     this.getSuggestedParams = p.getSuggestedParams;
-  }
-
-  composer(): Composer {
-    return new Composer({
-      getSuggestedParams:
-        this.getSuggestedParams ??
-        (() => this.algod.getTransactionParams().do()),
-    });
   }
 
   private async executeWithErrorParsing(composer: Composer<unknown[]>) {
@@ -533,28 +603,16 @@ export class ARC56AppClient {
   ): Promise<MethodCallResult<TReturn>> {
     const callOrCreate = this.appId === 0n ? "create" : "call";
 
-    const composer = this.composer();
+    const composer = new Composer({
+      getSuggestedParams:
+        this.getSuggestedParams ??
+        (() => this.algod.getTransactionParams().do()),
+    });
 
     composer.addMethodCall({
       ...this.getParams(params),
       onComplete,
     });
-
-    const ocStrings: Array<
-      | "NoOp"
-      | "OptIn"
-      | "CloseOut"
-      | "ClearState"
-      | "UpdateApplication"
-      | "DeleteApplication"
-    > = [
-      "NoOp",
-      "OptIn",
-      "CloseOut",
-      "ClearState",
-      "UpdateApplication",
-      "DeleteApplication",
-    ];
 
     const arc56Method = this.arc56.methods.find(
       (m) => m.name === params.method,
@@ -565,7 +623,7 @@ export class ARC56AppClient {
       );
     }
 
-    const ocString = ocStrings[onComplete] ?? "NoOp";
+    const ocString = ON_COMPLETE_STRINGS[onComplete] ?? "NoOp";
     if (
       !(arc56Method.actions[callOrCreate] as readonly string[]).includes(
         ocString,
@@ -696,6 +754,9 @@ export class ARC56AppClient {
       numLocalInts,
       approvalProgram,
       clearProgram,
+      extraPages:
+        methodParams.extraPages ??
+        requiredExtraPages(approvalProgram, clearProgram),
     };
 
     const result = await tempClient.callWithOC<TReturn>(
@@ -722,6 +783,107 @@ export class ARC56AppClient {
       appAddress: appClient.appAddress,
       result: result.result,
       returnValue: result.returnValue,
+    };
+  }
+
+  /**
+   * Create an application with a bare (non-ABI) call, for contracts whose
+   * `bareActions.create` is non-empty.
+   */
+  static async bareCreate(
+    params: ARC56AppClientBareCreateParams,
+  ): Promise<BareCreateResult> {
+    const { arc56, algod, getSuggestedParams, ...createParams } = params;
+    const clientParams = { arc56, algod, getSuggestedParams };
+
+    const tempClient = new ARC56AppClient({ ...clientParams, appId: 0n });
+
+    const bareCreateActions = tempClient.arc56.bareActions?.create ?? [];
+    if (bareCreateActions.length === 0) {
+      throw Error(
+        `${tempClient.arc56.name} does not support bare creation. Use one of its create methods instead.`,
+      );
+    }
+
+    const onComplete =
+      createParams.onComplete ?? algosdk.OnApplicationComplete.NoOpOC;
+    const ocString = ON_COMPLETE_STRINGS[onComplete];
+    if (
+      ocString === undefined ||
+      !(bareCreateActions as readonly string[]).includes(ocString)
+    ) {
+      throw Error(
+        `${ocString ?? onComplete} is not a supported bare create action for ${tempClient.arc56.name}`,
+      );
+    }
+
+    const approvalProgram =
+      createParams.approvalProgram ??
+      (await tempClient.compileProgram(
+        "approval",
+        createParams.templateVariables,
+      ));
+    const clearProgram =
+      createParams.clearProgram ??
+      (await tempClient.compileProgram(
+        "clear",
+        createParams.templateVariables,
+      ));
+
+    const composer = new Composer({
+      getSuggestedParams:
+        getSuggestedParams ?? (() => algod.getTransactionParams().do()),
+    });
+    composer.addAppCreate({
+      ...createParams,
+      onComplete,
+      approvalProgram,
+      clearProgram,
+      extraPages:
+        createParams.extraPages ??
+        requiredExtraPages(approvalProgram, clearProgram),
+      numGlobalByteSlices:
+        createParams.numGlobalByteSlices ??
+        tempClient.arc56.state?.schema?.global?.bytes ??
+        0,
+      numGlobalInts:
+        createParams.numGlobalInts ??
+        tempClient.arc56.state?.schema?.global?.ints ??
+        0,
+      numLocalByteSlices:
+        createParams.numLocalByteSlices ??
+        tempClient.arc56.state?.schema?.local?.bytes ??
+        0,
+      numLocalInts:
+        createParams.numLocalInts ??
+        tempClient.arc56.state?.schema?.local?.ints ??
+        0,
+    });
+
+    const result = await tempClient.executeWithErrorParsing(composer);
+
+    const createTxId = result.txIDs.at(-1);
+    if (createTxId === undefined) {
+      throw Error("Application creation failed: no transaction ID returned");
+    }
+
+    const txInfo = await algod.pendingTransactionInformation(createTxId).do();
+    if (txInfo.applicationIndex === undefined) {
+      throw Error(
+        "Application creation failed: applicationIndex not found in transaction result",
+      );
+    }
+
+    const appClient = new ARC56AppClient({
+      ...clientParams,
+      appId: txInfo.applicationIndex,
+    });
+
+    return {
+      appClient,
+      appId: appClient.appId,
+      appAddress: appClient.appAddress,
+      result: { confirmedRound: result.confirmedRound, txIDs: result.txIDs },
     };
   }
 

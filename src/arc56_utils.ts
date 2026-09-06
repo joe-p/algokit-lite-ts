@@ -16,43 +16,31 @@ export function getABITypeFromStructFields(
   arc56: ARC56Contract,
   structFields: StructDef,
 ): string {
-  const typesArray: unknown[] = [];
+  const typesArray: string[] = [];
+
+  // Join rather than reformatting a JSON array, so that the square brackets of
+  // a sized element type such as `byte[96]` survive
+  const pushType = (val: StructDef) => {
+    if (typeof val !== "string") {
+      typesArray.push(getABITypeFromStructFields(arc56, val));
+    } else if (arc56.structs && arc56.structs[val]) {
+      typesArray.push(getABIType(arc56, val));
+    } else {
+      typesArray.push(val);
+    }
+  };
 
   if (Array.isArray(structFields)) {
     for (const field of structFields) {
-      const val = field.type;
-      if (Array.isArray(val)) {
-        typesArray.push(getABITypeFromStructFields(arc56, val));
-      } else if (
-        typeof val === "string" &&
-        arc56.structs &&
-        arc56.structs[val]
-      ) {
-        typesArray.push(getABIType(arc56, val));
-      } else {
-        typesArray.push(val);
-      }
+      pushType(field.type);
     }
   } else if (typeof structFields === "object") {
-    for (const [, val] of Object.entries(structFields)) {
-      if (typeof val === "object") {
-        typesArray.push(getABITypeFromStructFields(arc56, val));
-      } else if (
-        typeof val === "string" &&
-        arc56.structs &&
-        arc56.structs[val]
-      ) {
-        typesArray.push(getABIType(arc56, val));
-      } else {
-        typesArray.push(val);
-      }
+    for (const val of Object.values(structFields)) {
+      pushType(val);
     }
   }
 
-  return JSON.stringify(typesArray)
-    .replace(/"/g, "")
-    .replace(/\]/g, ")")
-    .replace(/\[/g, "(");
+  return `(${typesArray.join(",")})`;
 }
 
 export function getABIType(arc56: ARC56Contract, type: string): string {
