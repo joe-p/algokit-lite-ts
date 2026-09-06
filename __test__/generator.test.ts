@@ -49,14 +49,12 @@ describe("ARC56Generator", () => {
     );
 
     // Check methods
-    expect(code).toContain("params = (methodParams?: TypedMethodParams) => {");
-    expect(code).toContain("foo: (inputs: Inputs): MethodParams => {");
+    expect(code).toContain("params = {");
     expect(code).toContain(
-      "call = (methodParams: TypedMethodParams = {}) => {",
+      "foo: (\n      methodParams: TypedMethodParams<{ inputs: Inputs }>,",
     );
-    expect(code).toContain(
-      "optIn = (methodParams: TypedMethodParams = {}) => {",
-    );
+    expect(code).toContain("call = {");
+    expect(code).toContain("optIn = {");
     expect(code).toContain("templateVariables: TemplateVariables;");
     expect(code).toContain("createApplication: async ()");
 
@@ -131,12 +129,18 @@ describe("ARC56Generator", () => {
       subtract: { a: 50n, b: 15n },
     };
 
-    const callResult = await appClient.call({ sender: dispenser }).foo(inputs);
+    const callResult = await appClient.call.foo({
+      sender: dispenser,
+      args: { inputs },
+    });
     expect(callResult.returnValue).toEqual({ sum: 30n, difference: 35n });
 
     // 3. Call method with a different sender
     const bob = await localnet.generateAccount({ fund: 10_000_000n });
-    const bobResult = await appClient.call({ sender: bob }).foo(inputs);
+    const bobResult = await appClient.call.foo({
+      sender: bob,
+      args: { inputs },
+    });
     expect(bobResult.returnValue).toEqual({ sum: 30n, difference: 35n });
 
     // 4. OptIn (needs box references and MBR)
@@ -157,15 +161,13 @@ describe("ARC56Generator", () => {
       ),
     );
 
-    const optInResult = await appClient
-      .optIn({
-        sender: dispenser,
-        boxes: [
-          { appIndex: 0, name: box1 },
-          { appIndex: 0, name: box2 },
-        ],
-      })
-      .optInToApplication();
+    const optInResult = await appClient.optIn.optInToApplication({
+      sender: dispenser,
+      boxes: [
+        { appIndex: 0, name: box1 },
+        { appIndex: 0, name: box2 },
+      ],
+    });
     expect(optInResult.result.confirmedRound).toBeGreaterThan(0n);
 
     // 5. Read state
@@ -195,7 +197,9 @@ describe("ARC56Generator", () => {
 
     // 6. Composer integration via params()
     const composer = localnet.composer();
-    composer.addMethodCall(appClient.params({ sender: dispenser }).foo(inputs));
+    composer.addMethodCall(
+      appClient.params.foo({ sender: dispenser, args: { inputs } }),
+    );
     const compResult = await composer.execute(localnet.algod);
     expect(compResult.confirmedRound).toBeGreaterThan(0n);
 
@@ -207,9 +211,14 @@ describe("ARC56Generator", () => {
 
     // 8. Error handling
     expect(
-      appClient.call({ sender: dispenser }).foo({
-        add: { a: 1n, b: 2n },
-        subtract: { a: 1n, b: 100n },
+      appClient.call.foo({
+        sender: dispenser,
+        args: {
+          inputs: {
+            add: { a: 1n, b: 2n },
+            subtract: { a: 1n, b: 100n },
+          },
+        },
       }),
     ).rejects.toThrow("subtract.a must be greater than subtract.b");
   });
@@ -264,8 +273,12 @@ describe("ARC56Generator", () => {
     expect(code).toContain("export type Point = {");
     expect(code).toContain("x: uint64;");
     expect(code).toContain("y: uint64;");
-    expect(code).toContain("hello: (name: string): MethodParams => {");
-    expect(code).toContain("calculate: (coords: Point): MethodParams => {");
+    expect(code).toContain(
+      "hello: (\n      methodParams: TypedMethodParams<{ name: string }>,",
+    );
+    expect(code).toContain(
+      "calculate: (\n      methodParams: TypedMethodParams<{ coords: Point }>,",
+    );
     expect(code).toContain("hello: async (");
     expect(code).toContain("calculate: async (");
     expect(code).toContain("static override create(");

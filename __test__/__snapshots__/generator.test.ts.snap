@@ -13,7 +13,11 @@ import {
   type CreateMethodCallResult,
 } from "algokit-lite";
 
-type TypedMethodParams = Omit<AppClientMethodParams, "method" | "methodArgs">;
+type TypedMethodParams<TArgs = undefined> = Omit<
+  AppClientMethodParams,
+  "method" | "methodArgs"
+> &
+  (TArgs extends undefined ? { args?: undefined } : { args: TArgs });
 type TypedCreateMethodParams = Omit<
   CreateMethodParams,
   "method" | "methodArgs"
@@ -58,58 +62,55 @@ export class ARC56TestClient extends ARC56AppClient {
     super({ arc56: JSON.parse(ARC56_JSON), ...p });
   }
 
-  params = (methodParams?: TypedMethodParams) => {
-    return {
-      foo: (inputs: Inputs): MethodParams => {
-        return this.getParams({
-          method: "foo",
-          ...methodParams,
-          methodArgs: [inputs],
-        });
-      },
-      optInToApplication: (): MethodParams => {
-        return this.getParams({
-          method: "optInToApplication",
-          ...methodParams,
-          methodArgs: [],
-        });
-      },
-      createApplication: (): MethodParams => {
-        return this.getParams({
-          method: "createApplication",
-          ...methodParams,
-          methodArgs: [],
-        });
-      },
-    };
+  params = {
+    foo: (
+      methodParams: TypedMethodParams<{ inputs: Inputs }>,
+    ): MethodParams => {
+      return this.getParams({
+        method: "foo",
+        ...methodParams,
+        methodArgs: [methodParams.args.inputs],
+      });
+    },
+    optInToApplication: (
+      methodParams: TypedMethodParams = {},
+    ): MethodParams => {
+      return this.getParams({
+        method: "optInToApplication",
+        ...methodParams,
+        methodArgs: [],
+      });
+    },
+    createApplication: (methodParams: TypedMethodParams = {}): MethodParams => {
+      return this.getParams({
+        method: "createApplication",
+        ...methodParams,
+        methodArgs: [],
+      });
+    },
   };
 
-  call = (methodParams: TypedMethodParams = {}) => {
-    return {
-      foo: async (
-        inputs: Inputs,
-      ): Promise<{ result: MethodExecutionResult; returnValue: Outputs }> => {
-        return this.methodCall({
-          method: "foo",
-          ...methodParams,
-          methodArgs: [inputs],
-        });
-      },
-    };
+  call = {
+    foo: async (
+      methodParams: TypedMethodParams<{ inputs: Inputs }>,
+    ): Promise<{ result: MethodExecutionResult; returnValue: Outputs }> => {
+      return this.methodCall({
+        method: "foo",
+        ...methodParams,
+        methodArgs: [methodParams.args.inputs],
+      });
+    },
   };
-  optIn = (methodParams: TypedMethodParams = {}) => {
-    return {
-      optInToApplication: async (): Promise<{
-        result: MethodExecutionResult;
-        returnValue: void;
-      }> => {
-        return this.optInMethodCall({
-          method: "optInToApplication",
-          ...methodParams,
-          methodArgs: [],
-        });
-      },
-    };
+  optIn = {
+    optInToApplication: async (
+      methodParams: TypedMethodParams = {},
+    ): Promise<{ result: MethodExecutionResult; returnValue: void }> => {
+      return this.optInMethodCall({
+        method: "optInToApplication",
+        ...methodParams,
+        methodArgs: [],
+      });
+    },
   };
 
   static override create(

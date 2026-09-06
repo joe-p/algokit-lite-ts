@@ -246,28 +246,29 @@ export class ARC56Generator {
   }
 
   getParamsLines(): string[] {
-    const lines = [
-      "params = (methodParams?: TypedMethodParams) => {",
-      "return {",
-    ];
+    const lines = ["params = {"];
 
     this.arc56.methods.forEach((m) => {
-      const argsSig = m.args
-        .map(
-          (a, i) =>
-            `${a.name ?? `arg${i}`}: ${this.getTypeScriptType(a.struct ?? a.type)}`,
-        )
-        .join(", ");
-      const argNames = m.args.map((a, i) => a.name ?? `arg${i}`).join(", ");
+      if (m.args.length === 0) {
+        lines.push(
+          `${m.name}: (methodParams: TypedMethodParams = {}): MethodParams => {`,
+          `  return this.getParams({ method: "${m.name}", ...methodParams, methodArgs: [] });`,
+          "},",
+        );
+      } else {
+        const argsType = `{ ${m.args.map((a, i) => `${a.name ?? `arg${i}`}: ${this.getTypeScriptType(a.struct ?? a.type)}`).join("; ")} }`;
+        const methodArgsStr = m.args
+          .map((a, i) => `methodParams.args.${a.name ?? `arg${i}`}`)
+          .join(", ");
 
-      lines.push(
-        `${m.name}: (${argsSig}): MethodParams => {`,
-        `  return this.getParams({ method: "${m.name}", ...methodParams, methodArgs: [${argNames}] });`,
-        "},",
-      );
+        lines.push(
+          `${m.name}: (methodParams: TypedMethodParams<${argsType}>): MethodParams => {`,
+          `  return this.getParams({ method: "${m.name}", ...methodParams, methodArgs: [${methodArgsStr}] });`,
+          "},",
+        );
+      }
     });
 
-    lines.push("};");
     lines.push("};");
     return lines;
   }
@@ -316,31 +317,33 @@ export class ARC56Generator {
 
       if (methods.length === 0) continue;
 
-      lines.push(
-        `${property} = (methodParams: TypedMethodParams = {}) => {`,
-        "return {",
-      );
+      lines.push(`${property} = {`);
 
       methods.forEach((m) => {
-        const argsSig = m.args
-          .map(
-            (a, i) =>
-              `${a.name ?? `arg${i}`}: ${this.getTypeScriptType(a.struct ?? a.type)}`,
-          )
-          .join(", ");
-        const argNames = m.args.map((a, i) => a.name ?? `arg${i}`).join(", ");
         const retType = this.getTypeScriptType(
           m.returns.struct ?? m.returns.type,
         );
 
-        lines.push(
-          `${m.name}: async (${argsSig}): Promise<{ result: MethodExecutionResult; returnValue: ${retType} }> => {`,
-          `  return this.${clientMethod}({ method: "${m.name}", ...methodParams, methodArgs: [${argNames}] });`,
-          "},",
-        );
+        if (m.args.length === 0) {
+          lines.push(
+            `${m.name}: async (methodParams: TypedMethodParams = {}): Promise<{ result: MethodExecutionResult; returnValue: ${retType} }> => {`,
+            `  return this.${clientMethod}({ method: "${m.name}", ...methodParams, methodArgs: [] });`,
+            "},",
+          );
+        } else {
+          const argsType = `{ ${m.args.map((a, i) => `${a.name ?? `arg${i}`}: ${this.getTypeScriptType(a.struct ?? a.type)}`).join("; ")} }`;
+          const methodArgsStr = m.args
+            .map((a, i) => `methodParams.args.${a.name ?? `arg${i}`}`)
+            .join(", ");
+
+          lines.push(
+            `${m.name}: async (methodParams: TypedMethodParams<${argsType}>): Promise<{ result: MethodExecutionResult; returnValue: ${retType} }> => {`,
+            `  return this.${clientMethod}({ method: "${m.name}", ...methodParams, methodArgs: [${methodArgsStr}] });`,
+            "},",
+          );
+        }
       });
 
-      lines.push("};");
       lines.push("};");
     }
 
@@ -549,7 +552,11 @@ import {
   type CreateMethodCallResult,
 } from "${clientImportPath}";
 
-type TypedMethodParams = Omit<AppClientMethodParams, "method" | "methodArgs">;
+type TypedMethodParams<TArgs = undefined> = Omit<
+  AppClientMethodParams,
+  "method" | "methodArgs"
+> &
+  (TArgs extends undefined ? { args?: undefined } : { args: TArgs });
 type TypedCreateMethodParams = Omit<CreateMethodParams, "method" | "methodArgs">;
 
 const ARC56_JSON = ${JSON.stringify(JSON.stringify(this.arc56))};
