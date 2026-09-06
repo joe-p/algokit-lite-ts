@@ -604,7 +604,6 @@ export class ARC56AppClient {
     const callOrCreate = this.appId === 0n ? "create" : "call";
 
     const composer = new Composer({
-      algod: this.algod,
       getSuggestedParams:
         this.getSuggestedParams ??
         (() => this.algod.getTransactionParams().do()),
@@ -832,7 +831,6 @@ export class ARC56AppClient {
       ));
 
     const composer = new Composer({
-      algod,
       getSuggestedParams:
         getSuggestedParams ?? (() => algod.getTransactionParams().do()),
     });

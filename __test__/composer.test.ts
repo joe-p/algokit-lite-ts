@@ -323,7 +323,7 @@ describe("Composer ARC56", () => {
           method: "foo",
           sender,
         })
-        .buildGroup(),
+        .buildGroupOffline(),
     ).rejects.toThrow(
       "ARC56 definition is required when method is specified as a string",
     );
@@ -340,7 +340,7 @@ describe("Composer ARC56", () => {
           method: "foo",
           sender,
         })
-        .buildGroup(),
+        .buildGroupOffline(),
     ).rejects.toThrow("appID (or appId) is required for method call");
   });
 
@@ -374,7 +374,7 @@ describe("Composer ARC56", () => {
       methodArgs: [{ add: { a: 1n, b: 2n }, subtract: { a: 10n, b: 5n } }],
     });
 
-    const txns = await composer.buildGroup();
+    const txns = await composer.buildGroupOffline();
     const appTxn = getTxn(txns, 0).txn;
 
     if (!appTxn.applicationCall) {
@@ -411,7 +411,7 @@ describe("Composer ARC56", () => {
         staticFee: 5_000n,
         methodArgs: [{ add: { a: 1n, b: 2n }, subtract: { a: 10n, b: 5n } }],
       })
-      .buildGroup();
+      .buildGroupOffline();
 
     expect(getTxn(txns, 0).txn.fee).toBe(0n);
     expect(getTxn(txns, 1).txn.fee).toBe(5_000n);
@@ -420,7 +420,6 @@ describe("Composer ARC56", () => {
   it("should cover a zero-fee transaction with a capped maxUsage", async () => {
     const composer = new Composer({
       getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
-      algod: localnet.algod,
     });
 
     const txns = await composer
@@ -438,7 +437,7 @@ describe("Composer ARC56", () => {
         maxUsage: 3_000_000n,
         methodArgs: [{ add: { a: 1n, b: 2n }, subtract: { a: 10n, b: 5n } }],
       })
-      .buildGroup();
+      .buildGroup(localnet.algod);
 
     expect(getTxn(txns, 0).txn.fee).toBe(0n);
     const fee = getTxn(txns, 1).txn.fee;

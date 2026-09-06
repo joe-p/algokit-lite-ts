@@ -87,7 +87,6 @@ export class Localnet {
 
   composer() {
     return new Composer({
-      algod: this.algod,
       getSuggestedParams: () => {
         return this.algod.getTransactionParams().do();
       },

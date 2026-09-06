@@ -133,14 +133,8 @@ export class Composer<TReturns extends unknown[] = []> {
    */
   getSuggestedParams?: () => Promise<SuggestedParams>;
 
-  algod?: Algodv2;
-
-  constructor(opts: {
-    getSuggestedParams?: () => Promise<SuggestedParams>;
-    algod?: Algodv2;
-  }) {
+  constructor(opts: { getSuggestedParams?: () => Promise<SuggestedParams> }) {
     this.getSuggestedParams = opts.getSuggestedParams;
-    this.algod = opts.algod;
   }
 
   private async getSdkParams(
@@ -283,8 +277,11 @@ export class Composer<TReturns extends unknown[] = []> {
     Composer.regroup(txns);
   }
 
-  /** Turn the pending params into transactions on the underlying composer */
-  private async innerBuild(): Promise<void> {
+  private async _buildGroup(algod?: Algodv2) {
+    if (this.atc.getStatus() >= AtomicTransactionComposerStatus.BUILT) {
+      return this.atc.buildGroup();
+    }
+
     const { atc } = this;
     for (const p of this.pendingParams) {
       if ("txn" in p) {
@@ -387,19 +384,20 @@ export class Composer<TReturns extends unknown[] = []> {
         maxUsage: paramOverridesOf(p).maxUsage,
       });
     }
-  }
 
-  async buildGroup() {
-    if (this.atc.getStatus() >= AtomicTransactionComposerStatus.BUILT) {
-      return this.atc.buildGroup();
-    }
-
-    await this.innerBuild();
-    if (this.algod) {
-      await this.simulateForInfo(this.algod);
+    if (algod) {
+      await this.simulateForInfo(algod);
     }
 
     return this.atc.buildGroup();
+  }
+
+  async buildGroup(algod: Algodv2) {
+    return this._buildGroup(algod);
+  }
+
+  buildGroupOffline() {
+    return this._buildGroup();
   }
 
   private decodeResults(methodResults: algosdk.ABIResult[]): MethodResult[] {
@@ -461,7 +459,7 @@ export class Composer<TReturns extends unknown[] = []> {
     algod: Algodv2,
     roundsToWait: number = 3,
   ): Promise<ComposerExecuteResult<TReturns>> {
-    await this.buildGroup();
+    await this.buildGroup(algod);
     // TODO: wait until latest last valid by default
     const result = await this.atc.execute(algod, roundsToWait);
 
@@ -481,7 +479,7 @@ export class Composer<TReturns extends unknown[] = []> {
     methodResults: MethodResults<TReturns>;
     simulateResponse: algosdk.modelsv2.SimulateResponse;
   }> {
-    await this.buildGroup();
+    await this.buildGroup(algod);
     const result = await this.atc.simulate(algod, request);
 
     return {
