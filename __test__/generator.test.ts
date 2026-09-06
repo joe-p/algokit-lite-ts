@@ -5,6 +5,7 @@ import * as fs from "fs";
 import { Localnet } from "../src/localnet";
 import { ARC56Generator } from "../src/generator";
 import type { ARC56Contract } from "../src/types/arc56";
+import type { ARC56TestReturnTypes } from "../example/ARC56TestClient";
 import arc56Json from "./fixtures/ARC56Test.arc56.json";
 
 describe("ARC56Generator", () => {
@@ -39,6 +40,11 @@ describe("ARC56Generator", () => {
     expect(code).toContain("add: {");
     expect(code).toContain("subtract: {");
 
+    // Check method return types
+    expect(code).toContain("export type ARC56TestReturnTypes = {");
+    expect(code).toContain("foo: Outputs;");
+    expect(code).toContain("optInToApplication: void;");
+
     // Check template variables type
     expect(code).toContain("export type TemplateVariables = {");
     expect(code).toContain("someNumber: uint64;");
@@ -71,7 +77,9 @@ describe("ARC56Generator", () => {
 
     // Check decodeReturnValue
     expect(code).toContain("decodeReturnValue = {");
-    expect(code).toContain("foo: (rawValue: Uint8Array): Outputs => {");
+    expect(code).toContain(
+      'foo: (rawValue: Uint8Array): ARC56TestReturnTypes["foo"] => {',
+    );
   });
 
   it("should match snapshot for the full generated typed client", async () => {
@@ -208,6 +216,8 @@ describe("ARC56Generator", () => {
     // 7. Decode return value
     const firstResult = compResult.methodResults[0];
     if (!firstResult) throw new Error("Expected method result");
+    const returnValue = firstResult.returnValue as ARC56TestReturnTypes["foo"];
+    expect(returnValue).toEqual({ sum: 30n, difference: 35n });
     const decoded = appClient.decodeReturnValue.foo(firstResult.rawReturnValue);
     expect(decoded).toEqual({ sum: 30n, difference: 35n });
 

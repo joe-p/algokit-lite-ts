@@ -43,6 +43,12 @@ export type Inputs = {
   };
 };
 
+export type ARC56TestReturnTypes = {
+  foo: Outputs;
+  optInToApplication: void;
+  createApplication: void;
+};
+
 /** Compile-time variables */
 export type TemplateVariables = {
   someNumber: uint64;
@@ -89,7 +95,10 @@ export class ARC56TestClient extends ARC56AppClient {
   call = {
     foo: async (
       methodParams: TypedMethodParams<{ inputs: Inputs }>,
-    ): Promise<{ result: MethodExecutionResult; returnValue: Outputs }> => {
+    ): Promise<{
+      result: MethodExecutionResult;
+      returnValue: ARC56TestReturnTypes["foo"];
+    }> => {
       return this.methodCall({
         method: "foo",
         ...methodParams,
@@ -100,7 +109,10 @@ export class ARC56TestClient extends ARC56AppClient {
   optIn = {
     optInToApplication: async (
       methodParams: TypedMethodParams = {},
-    ): Promise<{ result: MethodExecutionResult; returnValue: void }> => {
+    ): Promise<{
+      result: MethodExecutionResult;
+      returnValue: ARC56TestReturnTypes["optInToApplication"];
+    }> => {
       return this.optInMethodCall({
         method: "optInToApplication",
         ...methodParams,
@@ -121,7 +133,7 @@ export class ARC56TestClient extends ARC56AppClient {
     ): Promise<{
       appClient: ARC56TestClient;
       result: MethodExecutionResult;
-      returnValue: void;
+      returnValue: ARC56TestReturnTypes["createApplication"];
       appId: bigint;
       appAddress: algosdk.Address;
     }> => {
@@ -141,7 +153,7 @@ export class ARC56TestClient extends ARC56AppClient {
         appId,
         appAddress,
         result,
-        returnValue: returnValue as void,
+        returnValue: returnValue as ARC56TestReturnTypes["createApplication"],
       };
     },
   };
@@ -183,7 +195,7 @@ export class ARC56TestClient extends ARC56AppClient {
   };
 
   decodeReturnValue = {
-    foo: (rawValue: Uint8Array): Outputs => {
+    foo: (rawValue: Uint8Array): ARC56TestReturnTypes["foo"] => {
       return this.decodeMethodReturnValue("foo", rawValue);
     },
   };

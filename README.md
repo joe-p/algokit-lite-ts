@@ -84,14 +84,19 @@ const resultOfMethodTwo = result.returns[1]
 
 #### Lite
 
-With Lite, you can use the app client's `params` object to get the parameters to pass to a `Composer`. You can then use the client's `decodeMethodReturnValue` method to get the ARC56 value.
+With Lite, you can use the app client's `params` object to get the parameters to pass to a `Composer`. You can then use the generated client's `${arc56.name}ReturnTypes` type to get the ARC56 value.
 
 ```ts
+import {
+  HelloWorldClient,
+  HelloWorldReturnTypes,
+} from "../contracts/clients/HelloWorld";
+
 const result = new Composer(...)
   .addMethodCall(client.params.methodOne({ args: { arg1: 123 } }))
   .addMethodCall(client.params.methodTwo({ args: { arg1: 'foo' } }))
   .execute()
 
-const resultOfMethodOne = result.methodResults[0].returnValue as { arg1 number });
-const resultOfMethodTwo = result.methodResults[1].returnValue as { arg1: string });
+const resultOfMethodOne = result.methodResults[0].returnValue as HelloWorldReturnTypes['methodOne']);
+const resultOfMethodTwo = result.methodResults[1].returnValue as HelloWorldReturnTypes['methodTwo']);
 ```

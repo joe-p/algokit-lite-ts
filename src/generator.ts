@@ -273,6 +273,20 @@ export class ARC56Generator {
     return lines;
   }
 
+  getReturnTypesLines(): string[] {
+    const lines = [`export type ${this.arc56.name}ReturnTypes = {`];
+
+    this.arc56.methods.forEach((m) => {
+      const retType = this.getTypeScriptType(
+        m.returns.struct ?? m.returns.type,
+      );
+      lines.push(`${m.name}: ${retType};`);
+    });
+
+    lines.push("};");
+    return lines;
+  }
+
   getCallLines(): string[] {
     const lines: string[] = [];
 
@@ -320,9 +334,7 @@ export class ARC56Generator {
       lines.push(`${property} = {`);
 
       methods.forEach((m) => {
-        const retType = this.getTypeScriptType(
-          m.returns.struct ?? m.returns.type,
-        );
+        const retType = `${this.arc56.name}ReturnTypes["${m.name}"]`;
 
         if (m.args.length === 0) {
           lines.push(
@@ -364,9 +376,7 @@ export class ARC56Generator {
     lines.push("static create = {");
 
     createMethods.forEach((m) => {
-      const retType = this.getTypeScriptType(
-        m.returns.struct ?? m.returns.type,
-      );
+      const retType = `${this.arc56.name}ReturnTypes["${m.name}"]`;
 
       const hasArgs = m.args.length > 0;
       const argsType = hasArgs
@@ -491,9 +501,7 @@ export class ARC56Generator {
     this.arc56.methods.forEach((m) => {
       if (m.returns.type === "void") return;
 
-      const retType = this.getTypeScriptType(
-        m.returns.struct ?? m.returns.type,
-      );
+      const retType = `${this.arc56.name}ReturnTypes["${m.name}"]`;
       lines.push(
         `${m.name}: (rawValue: Uint8Array): ${retType} => {`,
         `  return this.decodeMethodReturnValue("${m.name}", rawValue);`,
@@ -547,6 +555,8 @@ const ARC56_JSON = ${JSON.stringify(JSON.stringify(this.arc56))};
 ${this.getABITypeLines().join("\n")}
 
 ${this.getStructTypeLines().join("\n")}
+
+${this.getReturnTypesLines().join("\n")}
 
 ${this.getTemplateVariableTypeLines().join("\n")}
 
