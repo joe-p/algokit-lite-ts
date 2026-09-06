@@ -67,8 +67,8 @@ export class ARC56TestClient extends ARC56AppClient {
   params = {
     foo: (
       methodParams: TypedMethodParams<{ inputs: Inputs }>,
-    ): MethodParams => {
-      return this.getParams({
+    ): MethodParams<ARC56TestReturnTypes["foo"]> => {
+      return this.getParams<ARC56TestReturnTypes["foo"]>({
         method: "foo",
         ...methodParams,
         methodArgs: [methodParams.args.inputs],
@@ -76,15 +76,17 @@ export class ARC56TestClient extends ARC56AppClient {
     },
     optInToApplication: (
       methodParams: TypedMethodParams = {},
-    ): MethodParams => {
-      return this.getParams({
+    ): MethodParams<ARC56TestReturnTypes["optInToApplication"]> => {
+      return this.getParams<ARC56TestReturnTypes["optInToApplication"]>({
         method: "optInToApplication",
         ...methodParams,
         methodArgs: [],
       });
     },
-    createApplication: (methodParams: TypedMethodParams = {}): MethodParams => {
-      return this.getParams({
+    createApplication: (
+      methodParams: TypedMethodParams = {},
+    ): MethodParams<ARC56TestReturnTypes["createApplication"]> => {
+      return this.getParams<ARC56TestReturnTypes["createApplication"]>({
         method: "createApplication",
         ...methodParams,
         methodArgs: [],

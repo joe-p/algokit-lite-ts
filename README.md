@@ -29,14 +29,14 @@ import {
   HelloWorldFactory,
 } from "../contracts/clients/HelloWorld";
 
-const factory = algorand.client.getTypedAppFactory(HelloWorldAppFactory)
+const factory = algorand.client.getTypedAppFactory(HelloWorldAppFactory);
 
 const { appClient } = factory.send.create.createApplication({
   args: {
     arg1: 123,
-    arg2: 'foo',
+    arg2: "foo",
   },
-})
+});
 ```
 
 ##### Lite
@@ -44,19 +44,16 @@ const { appClient } = factory.send.create.createApplication({
 In AlgoKit Lite, there is no Factory class and creation is done via a static method
 
 ```ts
-import {
-  HelloWorldClient
-} from "../contracts/clients/HelloWorld";
+import { HelloWorldClient } from "../contracts/clients/HelloWorld";
 
-const { appClient } =
-      await HelloWorldAppClient.create.createApplication({
-        algod: localnet.algod,
-        args: {
-          arg1: 123,
-          arg2: 'foo',
-        },
-        sender,
-      });
+const { appClient } = await HelloWorldAppClient.create.createApplication({
+  algod: localnet.algod,
+  args: {
+    arg1: 123,
+    arg2: "foo",
+  },
+  sender,
+});
 ```
 
 #### Idempotent Deployer
@@ -73,30 +70,27 @@ AlgoKit Utils' generated client includes a typed composer for composing a group 
 const result = await client
   .newGroup()
   .methodOne({ args: { arg1: 123 } })
-  .methodTwo({ args: { arg1: 'foo' } })
-  .execute()
+  .methodTwo({ args: { arg1: "foo" } })
+  .execute();
 
 // Strongly typed as the return type of methodOne
-const resultOfMethodOne = result.returns[0]
+const resultOfMethodOne = result.returns[0];
 // Strongly typed as the return type of methodTwo
-const resultOfMethodTwo = result.returns[1]
+const resultOfMethodTwo = result.returns[1];
 ```
 
 #### Lite
 
-With Lite, you can use the app client's `params` object to get the parameters to pass to a `Composer`. You can then use the generated client's `${arc56.name}ReturnTypes` type to get the ARC56 value.
+With Lite, you can use the app client's `params` object to get the parameters to pass to a `Composer`. When calls are chained, the composer tracks each generated method's return type.
 
 ```ts
-import {
-  HelloWorldClient,
-  HelloWorldReturnTypes,
-} from "../contracts/clients/HelloWorld";
-
-const result = new Composer(...)
+const result = await new Composer(...)
   .addMethodCall(client.params.methodOne({ args: { arg1: 123 } }))
   .addMethodCall(client.params.methodTwo({ args: { arg1: 'foo' } }))
-  .execute()
+  .execute(algod)
 
-const resultOfMethodOne = result.methodResults[0].returnValue as HelloWorldReturnTypes['methodOne']);
-const resultOfMethodTwo = result.methodResults[1].returnValue as HelloWorldReturnTypes['methodTwo']);
+// Inferred as the return type of methodOne
+const resultOfMethodOne = result.methodResults[0].returnValue
+// Inferred as the return type of methodTwo
+const resultOfMethodTwo = result.methodResults[1].returnValue
 ```

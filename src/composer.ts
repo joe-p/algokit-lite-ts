@@ -53,7 +53,13 @@ export type StandardMethodParams = BaseMethodParams & {
   methodArgs?: algosdk.ABIArgument[];
 };
 
-export type MethodParams = ARC56MethodParams | StandardMethodParams;
+declare const methodReturnType: unique symbol;
+
+export type MethodParams<TReturn = unknown> = (
+  ARC56MethodParams | StandardMethodParams
+) & {
+  readonly [methodReturnType]?: TReturn;
+};
 
 export type PaymentParams = Params<
   typeof algosdk.makePaymentTxnWithSuggestedParamsFromObject
@@ -62,17 +68,24 @@ export type PaymentParams = Params<
 export type TransactionParams =
   { method: MethodParams } | { pay: PaymentParams };
 
-export interface MethodResult extends Omit<algosdk.ABIResult, "returnValue"> {
-  returnValue?: unknown;
+export interface MethodResult<TReturn = unknown> extends Omit<
+  algosdk.ABIResult,
+  "returnValue"
+> {
+  returnValue?: TReturn;
 }
 
-export interface ComposerExecuteResult {
+export type MethodResults<TReturns extends unknown[]> = TReturns extends []
+  ? MethodResult[]
+  : { [K in keyof TReturns]: MethodResult<TReturns[K]> };
+
+export interface ComposerExecuteResult<TReturns extends unknown[] = unknown[]> {
   confirmedRound: bigint;
   txIDs: string[];
-  methodResults: MethodResult[];
+  methodResults: MethodResults<TReturns>;
 }
 
-export class Composer {
+export class Composer<TReturns extends unknown[] = []> {
   private atc: AtomicTransactionComposer = new AtomicTransactionComposer();
   private pendingParams: TransactionParams[] = [];
 
@@ -111,8 +124,11 @@ export class Composer {
     return this.add({ pay: params });
   }
 
-  addMethodCall(params: MethodParams) {
-    return this.add({ method: params });
+  addMethodCall<TReturn>(
+    params: MethodParams<TReturn>,
+  ): Composer<[...TReturns, TReturn]> {
+    this.add({ method: params });
+    return this as unknown as Composer<[...TReturns, TReturn]>;
   }
 
   async buildGroup() {
@@ -143,11 +159,7 @@ export class Composer {
             p.method.method,
           );
           const rawArgs = p.method.methodArgs ?? [];
-          const encodedArgs = encodeMethodArgs(
-            arc56,
-            arc56Method,
-            rawArgs,
-          );
+          const encodedArgs = encodeMethodArgs(arc56, arc56Method, rawArgs);
 
           let boxes = p.method.boxes;
           if (boxes === undefined && arc56Method.recommendations?.boxes) {
@@ -267,7 +279,7 @@ export class Composer {
   async execute(
     algod: Algodv2,
     roundsToWait: number = 3,
-  ): Promise<ComposerExecuteResult> {
+  ): Promise<ComposerExecuteResult<TReturns>> {
     await this.buildGroup();
     // TODO: wait until latest last valid by default
     const result = await this.atc.execute(algod, roundsToWait);
@@ -275,7 +287,9 @@ export class Composer {
     return {
       confirmedRound: result.confirmedRound,
       txIDs: result.txIDs,
-      methodResults: this.decodeResults(result.methodResults),
+      methodResults: this.decodeResults(
+        result.methodResults,
+      ) as MethodResults<TReturns>,
     };
   }
 
@@ -283,7 +297,7 @@ export class Composer {
     algod: Algodv2,
     request?: algosdk.modelsv2.SimulateRequest,
   ): Promise<{
-    methodResults: MethodResult[];
+    methodResults: MethodResults<TReturns>;
     simulateResponse: algosdk.modelsv2.SimulateResponse;
   }> {
     await this.buildGroup();
@@ -291,7 +305,9 @@ export class Composer {
 
     return {
       simulateResponse: result.simulateResponse,
-      methodResults: this.decodeResults(result.methodResults),
+      methodResults: this.decodeResults(
+        result.methodResults,
+      ) as MethodResults<TReturns>,
     };
   }
 }

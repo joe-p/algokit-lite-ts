@@ -59,6 +59,7 @@ describe("ARC56Generator", () => {
     expect(code).toContain(
       "foo: (\n      methodParams: TypedMethodParams<{ inputs: Inputs }>,",
     );
+    expect(code).toContain('): MethodParams<ARC56TestReturnTypes["foo"]> => {');
     expect(code).toContain("call = {");
     expect(code).toContain("optIn = {");
     expect(code).toContain("templateVariables: TemplateVariables;");
@@ -107,9 +108,9 @@ describe("ARC56Generator", () => {
     await generator.generateToFile(clientPath);
 
     // Dynamically import the generated client
-    const module = (await import(clientPath)) as typeof import(
-      "../example/ARC56TestClient"
-    );
+    const module = (await import(
+      clientPath
+    )) as typeof import("../example/ARC56TestClient");
     const ARC56TestClient = module.ARC56TestClient;
     expect(ARC56TestClient).toBeDefined();
 
@@ -206,17 +207,18 @@ describe("ARC56Generator", () => {
     expect(boxMapVal).toEqual({ sum: 3n, difference: 1n });
 
     // 6. Composer integration via params()
-    const composer = localnet.composer();
-    composer.addMethodCall(
-      appClient.params.foo({ sender: dispenser, args: { inputs } }),
-    );
-    const compResult = await composer.execute(localnet.algod);
+    const compResult = await localnet
+      .composer()
+      .addMethodCall(
+        appClient.params.foo({ sender: dispenser, args: { inputs } }),
+      )
+      .execute(localnet.algod);
     expect(compResult.confirmedRound).toBeGreaterThan(0n);
 
     // 7. Decode return value
     const firstResult = compResult.methodResults[0];
-    if (!firstResult) throw new Error("Expected method result");
-    const returnValue = firstResult.returnValue as ARC56TestReturnTypes["foo"];
+    const returnValue: ARC56TestReturnTypes["foo"] | undefined =
+      firstResult.returnValue;
     expect(returnValue).toEqual({ sum: 30n, difference: 35n });
     const decoded = appClient.decodeReturnValue.foo(firstResult.rawReturnValue);
     expect(decoded).toEqual({ sum: 30n, difference: 35n });

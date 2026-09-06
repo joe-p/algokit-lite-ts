@@ -5,13 +5,11 @@ import algosdk, {
 } from "algosdk";
 import {
   Composer,
+  type ARC56MethodParams,
   type MethodParams,
   type MethodResult,
 } from "./composer";
-import {
-  type ARC56Contract,
-  type StorageMap,
-} from "./types/arc56";
+import { type ARC56Contract, type StorageMap } from "./types/arc56";
 import {
   getABIType as utilsGetABIType,
   getABITypeFromStructFields as utilsGetABITypeFromStructFields,
@@ -24,7 +22,7 @@ import {
 } from "./arc56_utils";
 
 export type AppClientMethodParams = Omit<
-  MethodParams,
+  ARC56MethodParams,
   "appID" | "appId" | "method" | "sender" | "methodArgs" | "arc56"
 > & {
   method: string;
@@ -98,7 +96,7 @@ export class ARC56AppClient {
     });
   }
 
-  private async executeWithErrorParsing(composer: Composer) {
+  private async executeWithErrorParsing(composer: Composer<unknown[]>) {
     try {
       return await composer.execute(this.algod);
     } catch (e: unknown) {
@@ -452,7 +450,9 @@ export class ARC56AppClient {
     return new Uint8Array(Buffer.from(result.result, "base64"));
   }
 
-  getParams(params: AppClientMethodParams): MethodParams {
+  getParams<TReturn = unknown>(
+    params: AppClientMethodParams,
+  ): MethodParams<TReturn> {
     const sender = params.sender;
 
     if (sender === undefined) {

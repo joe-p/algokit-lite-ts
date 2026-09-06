@@ -249,10 +249,12 @@ export class ARC56Generator {
     const lines = ["params = {"];
 
     this.arc56.methods.forEach((m) => {
+      const retType = `${this.arc56.name}ReturnTypes["${m.name}"]`;
+
       if (m.args.length === 0) {
         lines.push(
-          `${m.name}: (methodParams: TypedMethodParams = {}): MethodParams => {`,
-          `  return this.getParams({ method: "${m.name}", ...methodParams, methodArgs: [] });`,
+          `${m.name}: (methodParams: TypedMethodParams = {}): MethodParams<${retType}> => {`,
+          `  return this.getParams<${retType}>({ method: "${m.name}", ...methodParams, methodArgs: [] });`,
           "},",
         );
       } else {
@@ -262,8 +264,8 @@ export class ARC56Generator {
           .join(", ");
 
         lines.push(
-          `${m.name}: (methodParams: TypedMethodParams<${argsType}>): MethodParams => {`,
-          `  return this.getParams({ method: "${m.name}", ...methodParams, methodArgs: [${methodArgsStr}] });`,
+          `${m.name}: (methodParams: TypedMethodParams<${argsType}>): MethodParams<${retType}> => {`,
+          `  return this.getParams<${retType}>({ method: "${m.name}", ...methodParams, methodArgs: [${methodArgsStr}] });`,
           "},",
         );
       }
