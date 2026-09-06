@@ -2,10 +2,14 @@
   "name": "algokit-lite",
   "module": "src/index.ts",
   "type": "module",
+  "bin": {
+    "algokit-lite": "./src/cli.ts"
+  },
   "scripts": {
     "check:lint": "eslint",
     "check:types": "tsc --noEmit",
-    "check": "bun check:lint && bun check:types"
+    "check": "bun check:lint && bun check:types",
+    "cli": "bun src/cli.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
