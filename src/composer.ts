@@ -6,6 +6,7 @@ import algosdk, {
   type AddressWithTransactionSigner,
   type SuggestedParams,
   type TransactionSigner,
+  type TransactionWithSigner,
 } from "algosdk";
 import type { ARC56Contract } from "./types/arc56";
 import {
@@ -13,7 +14,6 @@ import {
   encodeMethodArgs,
   getAbiMethod,
 } from "./arc56_utils";
-import { group } from "console";
 
 const USAGE_SCALE = 1_000_000n;
 export const BASE_USAGE = 1_000_000n;
@@ -126,7 +126,7 @@ export interface ComposerExecuteResult<TReturns extends unknown[] = unknown[]> {
 export class Composer<TReturns extends unknown[] = []> {
   private atc: AtomicTransactionComposer = new AtomicTransactionComposer();
   private pendingParams: TransactionParams[] = [];
-  private txnInfoByIndex = new Map<number, { maxUsage?: bigint }>();
+  private txnInfo: { maxUsage?: bigint }[] = [];
 
   /**
    * Called once per transaction that does not carry its own suggestedParams.
@@ -222,7 +222,7 @@ export class Composer<TReturns extends unknown[] = []> {
     // Simulate will fail if it doesn't have enough fees, so we will
     // max out the fees on each txn before simulating
     for (const [i, txn] of simTxns.entries()) {
-      const maxUsage = this.txnInfoByIndex.get(i)?.maxUsage;
+      const maxUsage = this.txnInfo[i]?.maxUsage;
       if (maxUsage) {
         const maxFee = feeForUsage(maxUsage, minFee);
         if (maxFee > txn.fee) {
@@ -292,7 +292,7 @@ export class Composer<TReturns extends unknown[] = []> {
     //
     // 3. Some combination of the above
     for (const [i, txn] of txns.entries()) {
-      const maxUsage = this.txnInfoByIndex.get(i)?.maxUsage;
+      const maxUsage = this.txnInfo[i]?.maxUsage;
       if (maxUsage) {
         const maxFee = feeForUsage(maxUsage, minFee);
         if (maxFee > txn.fee) {
@@ -401,6 +401,13 @@ export class Composer<TReturns extends unknown[] = []> {
               "ARC56 definition is required when method is specified as a string",
             );
           }
+          const { methodArgs } = p.method;
+          if (methodArgs)
+            for (const arg of methodArgs) {
+              if (typeof arg === "object" && "txn" in arg) {
+                this.txnInfo.push({});
+              }
+            }
           atc.addMethodCall({
             ...rawMethodParams,
             ...sdkParams,
@@ -411,11 +418,7 @@ export class Composer<TReturns extends unknown[] = []> {
         }
       } else throw Error("Unsupported transaction params");
 
-      // A method call appends its transaction arguments ahead of its own
-      // transaction, so the last one added is always this param's own
-      this.txnInfoByIndex.set(atc.count() - 1, {
-        maxUsage: paramOverridesOf(p).maxUsage,
-      });
+      this.txnInfo.push({ maxUsage: paramOverridesOf(p).maxUsage });
     }
 
     if (algod) {
