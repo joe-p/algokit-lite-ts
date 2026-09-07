@@ -23,10 +23,18 @@ export const BASE_USAGE = 1_000_000n;
 const feeForUsage = (usage: bigint, minFee: bigint): bigint =>
   (usage * minFee + USAGE_SCALE - 1n) / USAGE_SCALE;
 
+export type ComposerSender = AddressWithTransactionSigner & {
+  emptyTxnSigner?: TransactionSigner;
+};
+
+type TxnInfo = {
+  maxUsage?: bigint;
+  sender: ComposerSender;
+};
+
 type ParamOverrides = {
   suggestedParams?: SuggestedParams;
-  sender: AddressWithTransactionSigner;
-  signer?: TransactionSigner;
+  sender: ComposerSender;
   /**
    * Pay exactly this many microAlgos of fee, ignoring the suggested fee. Use it
    * both for transactions that pay nothing, such as logic signature calls, and
@@ -178,7 +186,7 @@ export interface ComposerExecuteResult<TReturns extends unknown[] = unknown[]> {
 export class Composer<TReturns extends unknown[] = []> {
   private atc: AtomicTransactionComposer = new AtomicTransactionComposer();
   private pendingParams: TransactionParams[] = [];
-  private txnInfo: { maxUsage?: bigint }[] = [];
+  private txnInfo: TxnInfo[] = [];
 
   /**
    * Called once per transaction that does not carry its own suggestedParams.
@@ -229,10 +237,13 @@ export class Composer<TReturns extends unknown[] = []> {
     argType: string,
   ): Promise<{
     arg: algosdk.TransactionWithSigner;
-    txnInfo?: { maxUsage?: bigint };
+    txnInfo: TxnInfo;
   }> {
     if (algosdk.isTransactionWithSigner(arg)) {
-      return { arg, txnInfo: {} };
+      return {
+        arg,
+        txnInfo: { sender: { address: arg.txn.sender, txnSigner: arg.signer } },
+      };
     }
 
     if (argType === "pay") {
@@ -244,7 +255,10 @@ export class Composer<TReturns extends unknown[] = []> {
       });
       return {
         arg: { txn, signer: sdkParams.signer },
-        txnInfo: { maxUsage: paymentParams.maxUsage },
+        txnInfo: {
+          maxUsage: paymentParams.maxUsage,
+          sender: paymentParams.sender,
+        },
       };
     }
 
@@ -416,6 +430,15 @@ export class Composer<TReturns extends unknown[] = []> {
 
     Composer.regroup(simTxns);
 
+    const signedSimTxns = simTxns.map(async (txn, i) => {
+      const emptySigner = this.txnInfo[i]?.sender.emptyTxnSigner;
+      if (emptySigner) {
+        return (await algosdk.signTransactionWithSigner(txn, emptySigner)).stxn;
+      } else {
+        return new SignedTransaction({ txn });
+      }
+    });
+
     const simulateResponse = await algod
       .simulateTransactions(
         new algosdk.modelsv2.SimulateRequest({
@@ -423,10 +446,7 @@ export class Composer<TReturns extends unknown[] = []> {
           fixSigners: true,
           txnGroups: [
             new algosdk.modelsv2.SimulateRequestTransactionGroup({
-              // NOTE: Right now we do not account for non ed signatures
-              // I think the path forward here is attaching an optional second
-              // signer specifically for simulate for each transaction
-              txns: simTxns.map((txn) => new SignedTransaction({ txn })),
+              txns: await Promise.all(signedSimTxns),
             }),
           ],
         }),
@@ -602,9 +622,7 @@ export class Composer<TReturns extends unknown[] = []> {
             if (!algosdk.abiTypeIsTransaction(argType)) continue;
             const built = await this.buildTxnArg(rawArgs[i], argType);
             encodedArgs[i] = built.arg;
-            if (built.txnInfo !== undefined) {
-              this.txnInfo.push(built.txnInfo);
-            }
+            this.txnInfo.push(built.txnInfo);
           }
 
           let boxes = p.method.boxes;
@@ -657,7 +675,9 @@ export class Composer<TReturns extends unknown[] = []> {
           if (methodArgs)
             for (const arg of methodArgs) {
               if (typeof arg === "object" && "txn" in arg) {
-                this.txnInfo.push({});
+                this.txnInfo.push({
+                  sender: { address: arg.txn.sender, txnSigner: arg.signer },
+                });
               }
             }
           atc.addMethodCall({
@@ -670,7 +690,8 @@ export class Composer<TReturns extends unknown[] = []> {
         }
       } else throw Error("Unsupported transaction params");
 
-      this.txnInfo.push({ maxUsage: paramOverridesOf(p).maxUsage });
+      const { maxUsage, sender } = paramOverridesOf(p);
+      this.txnInfo.push({ maxUsage, sender });
     }
 
     if (algod) {

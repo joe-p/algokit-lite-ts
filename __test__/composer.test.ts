@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from "bun:test";
-import algosdk from "algosdk";
+import algosdk, { type Falcon1024SigningKey } from "algosdk";
 import { Localnet } from "../src/localnet";
 import { ARC56AppClient } from "../src/arc56_client";
 import { BASE_USAGE, Composer, type MethodResult } from "../src/composer";
@@ -203,9 +203,7 @@ describe("Composer ARC56", () => {
       appID: appId,
       method: "deposit",
       sender,
-      methodArgs: [
-        { sender, receiver: sender.address, amount: 1_000_000n },
-      ],
+      methodArgs: [{ sender, receiver: sender.address, amount: 1_000_000n }],
     });
 
     const txns = await composer.buildGroupOffline();
@@ -496,6 +494,34 @@ describe("Composer ARC56", () => {
     expect(getTxn(txns, 0).txn.fee).toBe(1_308n);
   });
 
+  it("should cover a pqsig transaction with a capped maxUsage", async () => {
+    const emptyFalcon: Falcon1024SigningKey = {
+      falcon1024PublicKey: new Uint8Array(),
+      // eslint-disable-next-line @typescript-eslint/require-await, @typescript-eslint/no-unused-vars
+      falcon1024Signer: async (_: Uint8Array) => {
+        return new Uint8Array();
+      },
+    };
+
+    const pqSender =
+      algosdk.addressWithSignersFromRawFalcon1024Signer(emptyFalcon);
+    const composer = new Composer({
+      getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
+    });
+    await localnet.fundAccount(pqSender.address, 1_000_000n);
+
+    const txns = await composer
+      .addPayment({
+        sender: pqSender,
+        receiver: sender.address,
+        amount: 0n,
+        maxUsage: BASE_USAGE * 3n,
+      })
+      .buildGroup(localnet.algod);
+
+    expect(getTxn(txns, 0).txn.fee).toBe(3_000n);
+  });
+
   it("should throw error on not enough maxUsage", () => {
     const composer = new Composer({
       getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
@@ -764,7 +790,11 @@ describe("Composer ARC56", () => {
       ["addAppUpdate", (c) => c.addAppUpdate({ sender, appID: appId }), 4],
       ["addAppDelete", (c) => c.addAppDelete({ sender, appID: appId }), 5],
       ["addAppCloseOut", (c) => c.addAppCloseOut({ sender, appID: appId }), 2],
-      ["addAppClearState", (c) => c.addAppClearState({ sender, appID: appId }), 3],
+      [
+        "addAppClearState",
+        (c) => c.addAppClearState({ sender, appID: appId }),
+        3,
+      ],
       ["addAppNoOp", (c) => c.addAppNoOp({ sender, appID: appId }), 0],
     ];
 
