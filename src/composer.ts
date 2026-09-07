@@ -218,6 +218,8 @@ export class Composer<TReturns extends unknown[] = []> {
     const simTxns = simAtc.buildGroup().map((t) => t.txn);
     let addedFees = 0n;
 
+    // Simulate will fail if it doesn't have enough fees, so we will
+    // max out the fees on each txn before simulating
     for (const [i, txn] of simTxns.entries()) {
       const maxUsage = this.txnInfoByIndex.get(i)?.maxUsage;
       if (maxUsage) {
@@ -238,6 +240,9 @@ export class Composer<TReturns extends unknown[] = []> {
           fixSigners: true,
           txnGroups: [
             new algosdk.modelsv2.SimulateRequestTransactionGroup({
+              // NOTE: Right now we do not account for non ed signatures
+              // I think the path forward here is attaching an optional second
+              // signer specifically for simulate for each transaction
               txns: simTxns.map((txn) => new SignedTransaction({ txn })),
             }),
           ],
@@ -246,7 +251,9 @@ export class Composer<TReturns extends unknown[] = []> {
       .do();
 
     const groupResponse = simulateResponse.txnGroups[0];
-    if (groupResponse === undefined) throw Error(`TODO`);
+    if (groupResponse === undefined) {
+      throw Error("simulate did not include a group response");
+    }
 
     const { groupUsage, groupFeesPaid } = groupResponse;
 
@@ -258,6 +265,22 @@ export class Composer<TReturns extends unknown[] = []> {
     if (feeNeeded === 0n) return;
 
     const txns = this.atc.buildGroup().map((t) => t.txn);
+
+    // Distribute the required group fee across the transactions
+    //
+    // Right now it just starts at index 0 and keeps adding fees until its done
+    // This means that txns in the beginning of the group may end up paying more
+    // than at the end (if they all have the same max usage)
+    //
+    // Some alternatives
+    //
+    // 1. Increase fees in proportion to the txns maxUsage. Higher maxUsage pays more, but
+    // all txns still contribute
+    //
+    // 2. Increase fees inversely proportional to the txns flat fee. Txns that already
+    // contribute a lot to the group fees don't need to pay much extra
+    //
+    // 3. Some combination of the above
     for (const [i, txn] of txns.entries()) {
       const maxUsage = this.txnInfoByIndex.get(i)?.maxUsage;
       if (maxUsage) {
