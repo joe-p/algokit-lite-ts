@@ -2,11 +2,11 @@ import algosdk, {
   Algodv2,
   AtomicTransactionComposer,
   AtomicTransactionComposerStatus,
+  OnApplicationComplete,
   SignedTransaction,
   type AddressWithTransactionSigner,
   type SuggestedParams,
   type TransactionSigner,
-  type TransactionWithSigner,
 } from "algosdk";
 import type { ARC56Contract } from "./types/arc56";
 import {
@@ -52,16 +52,11 @@ type Params<SDKMethod extends (...args: never[]) => unknown> = Omit<
 > &
   ParamOverrides;
 
-type AppIdParams =
-  | { appID: number | bigint; appId?: number | bigint }
-  | { appID?: number | bigint; appId: number | bigint };
-
 export type BaseMethodParams = Omit<
   Parameters<typeof AtomicTransactionComposer.prototype.addMethodCall>[0],
-  "suggestedParams" | "sender" | "signer" | "method" | "methodArgs" | "appID"
+  "suggestedParams" | "sender" | "signer" | "method" | "methodArgs"
 > &
-  ParamOverrides &
-  AppIdParams;
+  ParamOverrides;
 
 export type ARC56MethodParams = BaseMethodParams & {
   arc56: ARC56Contract;
@@ -87,23 +82,80 @@ export type PaymentParams = Params<
   typeof algosdk.makePaymentTxnWithSuggestedParamsFromObject
 >;
 
-export type AppCreateParams = Params<
-  typeof algosdk.makeApplicationCreateTxnFromObject
+export type KeyRegParams = Params<
+  typeof algosdk.makeKeyRegistrationTxnWithSuggestedParamsFromObject
 >;
+
+export type AssetCreateParams = Params<
+  typeof algosdk.makeAssetCreateTxnWithSuggestedParamsFromObject
+>;
+
+export type AssetConfigParams = Params<
+  typeof algosdk.makeAssetConfigTxnWithSuggestedParamsFromObject
+>;
+
+export type AssetDestroyParams = Params<
+  typeof algosdk.makeAssetDestroyTxnWithSuggestedParamsFromObject
+>;
+
+export type AssetFreezeParams = Params<
+  typeof algosdk.makeAssetFreezeTxnWithSuggestedParamsFromObject
+>;
+
+export type AssetTransferParams = Params<
+  typeof algosdk.makeAssetTransferTxnWithSuggestedParamsFromObject
+>;
+
+export type AppCreateParams = Omit<
+  Params<typeof algosdk.makeApplicationCreateTxnFromObject>,
+  "onComplete"
+> & {
+  /** What application should do once the program has been run. Defaults to NoOp. */
+  onComplete?: algosdk.OnApplicationComplete;
+};
+
+/**
+ * Application ID for app-call transactions. Mirrors the AtomicTransactionComposer's
+ * `appID` naming (the makeApplication*TxnFromObject factories call this `appIndex`,
+ * but the composer normalizes it for the user).
+ */
+export type AppCallParams = Omit<
+  Params<typeof algosdk.makeApplicationCallTxnFromObject>,
+  "appIndex" | "onComplete"
+> & {
+  /** ID of the application to call */
+  appID: number | bigint;
+  /** What application should do once the program has been run */
+  onComplete?: algosdk.OnApplicationComplete;
+};
 
 export type TransactionParams =
   | { method: MethodParams }
   | { pay: PaymentParams }
   | { appCreate: AppCreateParams }
+  | { appCall: AppCallParams }
+  | { keyReg: KeyRegParams }
+  | { assetCreate: AssetCreateParams }
+  | { assetConfig: AssetConfigParams }
+  | { assetDestroy: AssetDestroyParams }
+  | { assetFreeze: AssetFreezeParams }
+  | { assetTransfer: AssetTransferParams }
   | { txn: algosdk.TransactionWithSigner };
 
 /** The overridable params of a transaction this composer builds itself */
 function paramOverridesOf(
   p: Exclude<TransactionParams, { txn: algosdk.TransactionWithSigner }>,
 ): ParamOverrides {
+  if ("method" in p) return p.method;
   if ("pay" in p) return p.pay;
   if ("appCreate" in p) return p.appCreate;
-  return p.method;
+  if ("appCall" in p) return p.appCall;
+  if ("keyReg" in p) return p.keyReg;
+  if ("assetCreate" in p) return p.assetCreate;
+  if ("assetConfig" in p) return p.assetConfig;
+  if ("assetDestroy" in p) return p.assetDestroy;
+  if ("assetFreeze" in p) return p.assetFreeze;
+  return p.assetTransfer;
 }
 
 export interface MethodResult<TReturn = unknown> extends Omit<
@@ -213,6 +265,101 @@ export class Composer<TReturns extends unknown[] = []> {
   /** Create an application with a bare (non-ABI) call */
   addAppCreate(params: AppCreateParams) {
     return this.add({ appCreate: params });
+  }
+
+  /** Register or deregister the account as part of the network's proof of stake */
+  addKeyReg(params: KeyRegParams) {
+    return this.add({ keyReg: params });
+  }
+
+  /** Create a new asset */
+  addAssetCreate(params: AssetCreateParams) {
+    return this.add({ assetCreate: params });
+  }
+
+  /** Change or remove the manager/reserve/freeze/clawback roles of an asset */
+  addAssetConfig(params: AssetConfigParams) {
+    return this.add({ assetConfig: params });
+  }
+
+  /** Destroy an asset, removing it from the ledger */
+  addAssetDestroy(params: AssetDestroyParams) {
+    return this.add({ assetDestroy: params });
+  }
+
+  /** Freeze or unfreeze an account's holdings of an asset */
+  addAssetFreeze(params: AssetFreezeParams) {
+    return this.add({ assetFreeze: params });
+  }
+
+  /** Transfer an asset (also used to opt an account into an asset) */
+  addAssetTransfer(params: AssetTransferParams) {
+    return this.add({ assetTransfer: params });
+  }
+
+  /** Add a bare application call (update, delete, etc.) with the given OnComplete */
+  addAppCall(params: AppCallParams) {
+    return this.add({ appCall: params });
+  }
+
+  /** Update an application's approval and clear programs */
+  addAppUpdate(params: AppCallParams) {
+    return this.add({
+      appCall: {
+        ...params,
+        onComplete: algosdk.OnApplicationComplete.UpdateApplicationOC,
+      },
+    });
+  }
+
+  /** Delete an application */
+  addAppDelete(params: AppCallParams) {
+    return this.add({
+      appCall: {
+        ...params,
+        onComplete: algosdk.OnApplicationComplete.DeleteApplicationOC,
+      },
+    });
+  }
+
+  /** Opt an account in to an application */
+  addAppOptIn(params: AppCallParams) {
+    return this.add({
+      appCall: {
+        ...params,
+        onComplete: algosdk.OnApplicationComplete.OptInOC,
+      },
+    });
+  }
+
+  /** Close out an account's state in an application */
+  addAppCloseOut(params: AppCallParams) {
+    return this.add({
+      appCall: {
+        ...params,
+        onComplete: algosdk.OnApplicationComplete.CloseOutOC,
+      },
+    });
+  }
+
+  /** Clear an account's state in an application */
+  addAppClearState(params: AppCallParams) {
+    return this.add({
+      appCall: {
+        ...params,
+        onComplete: algosdk.OnApplicationComplete.ClearStateOC,
+      },
+    });
+  }
+
+  /** Call an application with a no-op on completion */
+  addAppNoOp(params: AppCallParams) {
+    return this.add({
+      appCall: {
+        ...params,
+        onComplete: algosdk.OnApplicationComplete.NoOpOC,
+      },
+    });
   }
 
   /** Add a transaction that has already been built */
@@ -371,16 +518,74 @@ export class Composer<TReturns extends unknown[] = []> {
         const txn = algosdk.makeApplicationCreateTxnFromObject({
           ...p.appCreate,
           ...sdkParams,
+          onComplete: p.appCreate.onComplete ?? OnApplicationComplete.NoOpOC,
+        });
+
+        atc.addTransaction({ txn, signer: sdkParams.signer });
+      } else if ("appCall" in p) {
+        const { onComplete, ...rest } = p.appCall;
+        const sdkParams = await this.getSdkParams(rest);
+        const txn = algosdk.makeApplicationCallTxnFromObject({
+          ...rest,
+          ...sdkParams,
+          appIndex: p.appCall.appID,
+          onComplete: onComplete ?? OnApplicationComplete.NoOpOC,
+        });
+
+        atc.addTransaction({ txn, signer: sdkParams.signer });
+      } else if ("keyReg" in p) {
+        const sdkParams = await this.getSdkParams(p.keyReg);
+        const txn = algosdk.makeKeyRegistrationTxnWithSuggestedParamsFromObject(
+          {
+            ...p.keyReg,
+            ...sdkParams,
+          },
+        );
+
+        atc.addTransaction({ txn, signer: sdkParams.signer });
+      } else if ("assetCreate" in p) {
+        const sdkParams = await this.getSdkParams(p.assetCreate);
+        const txn = algosdk.makeAssetCreateTxnWithSuggestedParamsFromObject({
+          ...p.assetCreate,
+          ...sdkParams,
+        });
+
+        atc.addTransaction({ txn, signer: sdkParams.signer });
+      } else if ("assetConfig" in p) {
+        const sdkParams = await this.getSdkParams(p.assetConfig);
+        const txn = algosdk.makeAssetConfigTxnWithSuggestedParamsFromObject({
+          ...p.assetConfig,
+          ...sdkParams,
+        });
+
+        atc.addTransaction({ txn, signer: sdkParams.signer });
+      } else if ("assetDestroy" in p) {
+        const sdkParams = await this.getSdkParams(p.assetDestroy);
+        const txn = algosdk.makeAssetDestroyTxnWithSuggestedParamsFromObject({
+          ...p.assetDestroy,
+          ...sdkParams,
+        });
+
+        atc.addTransaction({ txn, signer: sdkParams.signer });
+      } else if ("assetFreeze" in p) {
+        const sdkParams = await this.getSdkParams(p.assetFreeze);
+        const txn = algosdk.makeAssetFreezeTxnWithSuggestedParamsFromObject({
+          ...p.assetFreeze,
+          ...sdkParams,
+        });
+
+        atc.addTransaction({ txn, signer: sdkParams.signer });
+      } else if ("assetTransfer" in p) {
+        const sdkParams = await this.getSdkParams(p.assetTransfer);
+        const txn = algosdk.makeAssetTransferTxnWithSuggestedParamsFromObject({
+          ...p.assetTransfer,
+          ...sdkParams,
         });
 
         atc.addTransaction({ txn, signer: sdkParams.signer });
       } else if ("method" in p) {
-        const { arc56, appId, ...rawMethodParams } = p.method;
+        const { arc56, appID, ...rawMethodParams } = p.method;
         const sdkParams = await this.getSdkParams(p.method);
-        const appID = p.method.appID ?? appId;
-        if (appID === undefined) {
-          throw new Error("appID (or appId) is required for method call");
-        }
 
         if (arc56) {
           const { abiMethod, arc56Method } = getAbiMethod(

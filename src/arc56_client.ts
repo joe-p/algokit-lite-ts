@@ -59,7 +59,7 @@ const ON_COMPLETE_STRINGS: Array<
 
 export type AppClientMethodParams = Omit<
   ARC56MethodParams,
-  "appID" | "appId" | "method" | "sender" | "methodArgs" | "arc56"
+  "appID" | "method" | "sender" | "methodArgs" | "arc56"
 > & {
   method: string;
   sender?: AddressWithTransactionSigner;

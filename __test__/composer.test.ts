@@ -73,13 +73,13 @@ describe("Composer ARC56", () => {
     expect(r.decodeError).toBeUndefined();
   });
 
-  it("should support appId as alias for appID", async () => {
+  it("should require appID for method call", async () => {
     const composer = localnet.composer();
     const inputs = { add: { a: 100n, b: 200n }, subtract: { a: 50n, b: 20n } };
 
     composer.addMethodCall({
       arc56,
-      appId, // using appId alias
+      appID: appId,
       method: "foo",
       sender,
       methodArgs: [inputs],
@@ -371,21 +371,6 @@ describe("Composer ARC56", () => {
     );
   });
 
-  it("should throw error if appID/appId is missing", () => {
-    const composer = localnet.composer();
-
-    expect(
-      composer
-        // @ts-expect-error missing appID / appId
-        .addMethodCall({
-          arc56,
-          method: "foo",
-          sender,
-        })
-        .buildGroupOffline(),
-    ).rejects.toThrow("appID (or appId) is required for method call");
-  });
-
   it("should auto-populate recommendations (boxes, accounts, apps, assets) if omitted", async () => {
     const boxKeyB64 = Buffer.from("myBoxKey").toString("base64");
     const baseMethod = arc56.methods[0];
@@ -613,6 +598,203 @@ describe("Composer ARC56", () => {
 
     expect(() => localnet.composer().addTransaction(txn as never)).toThrow(
       "A TransactionSigner is required",
+    );
+  });
+
+  it("should build a key registration transaction", async () => {
+    const voteKey = new Uint8Array(32);
+    const selectionKey = new Uint8Array(32);
+    const stateProofKey = new Uint8Array(64);
+
+    const txns = await localnet
+      .composer()
+      .addKeyReg({
+        sender,
+        voteKey,
+        selectionKey,
+        stateProofKey,
+        voteFirst: 10n,
+        voteLast: 20n,
+        voteKeyDilution: 10000n,
+      })
+      .buildGroupOffline();
+
+    const txn = getTxn(txns, 0).txn;
+    if (!txn.keyreg) throw new Error("Expected keyreg transaction");
+    expect(txn.keyreg.voteKey).toEqual(voteKey);
+    expect(txn.keyreg.selectionKey).toEqual(selectionKey);
+    expect(txn.keyreg.stateProofKey).toEqual(stateProofKey);
+    expect(txn.keyreg.voteFirst).toBe(10n);
+    expect(txn.keyreg.voteLast).toBe(20n);
+    expect(txn.keyreg.voteKeyDilution).toBe(10000n);
+  });
+
+  it("should build an asset create transaction", async () => {
+    const txns = await localnet
+      .composer()
+      .addAssetCreate({
+        sender,
+        total: 1000n,
+        decimals: 2,
+        unitName: "UNIT",
+        assetName: "Unit Token",
+        defaultFrozen: false,
+      })
+      .buildGroupOffline();
+
+    const txn = getTxn(txns, 0).txn;
+    if (!txn.assetConfig) throw new Error("Expected asset config transaction");
+    expect(txn.assetConfig.total).toBe(1000n);
+    expect(txn.assetConfig.decimals).toBe(2);
+    expect(txn.assetConfig.unitName).toBe("UNIT");
+    expect(txn.assetConfig.assetName).toBe("Unit Token");
+    expect(txn.assetConfig.defaultFrozen).toBe(false);
+  });
+
+  it("should build an asset transfer (opt-in) transaction", async () => {
+    const txns = await localnet
+      .composer()
+      .addAssetTransfer({
+        sender,
+        receiver: sender.address,
+        assetIndex: 1001n,
+        amount: 0n,
+      })
+      .buildGroupOffline();
+
+    const txn = getTxn(txns, 0).txn;
+    if (!txn.assetTransfer)
+      throw new Error("Expected asset transfer transaction");
+    expect(txn.assetTransfer.assetIndex).toBe(1001n);
+    expect(txn.assetTransfer.amount).toBe(0n);
+    expect(txn.assetTransfer.receiver.toString()).toBe(
+      sender.address.toString(),
+    );
+  });
+
+  it("should build an asset config (modify roles) transaction", async () => {
+    const manager = sender.address;
+    const txns = await localnet
+      .composer()
+      .addAssetConfig({
+        sender,
+        assetIndex: 1001n,
+        manager,
+        strictEmptyAddressChecking: false,
+      })
+      .buildGroupOffline();
+
+    const txn = getTxn(txns, 0).txn;
+    if (!txn.assetConfig) throw new Error("Expected asset config transaction");
+    expect(txn.assetConfig.assetIndex).toBe(1001n);
+    if (!txn.assetConfig.manager)
+      throw new Error("Expected asset config manager");
+    expect(txn.assetConfig.manager.toString()).toBe(manager.toString());
+  });
+
+  it("should build an asset destroy transaction", async () => {
+    const txns = await localnet
+      .composer()
+      .addAssetDestroy({ sender, assetIndex: 1001n })
+      .buildGroupOffline();
+
+    const txn = getTxn(txns, 0).txn;
+    if (!txn.assetConfig) throw new Error("Expected asset config transaction");
+    expect(txn.assetConfig.assetIndex).toBe(1001n);
+  });
+
+  it("should build an asset freeze transaction", async () => {
+    const txns = await localnet
+      .composer()
+      .addAssetFreeze({
+        sender,
+        assetIndex: 1001n,
+        freezeTarget: sender.address,
+        frozen: true,
+      })
+      .buildGroupOffline();
+
+    const txn = getTxn(txns, 0).txn;
+    if (!txn.assetFreeze) throw new Error("Expected asset freeze transaction");
+    expect(txn.assetFreeze.assetIndex).toBe(1001n);
+    expect(txn.assetFreeze.freezeAccount.toString()).toBe(
+      sender.address.toString(),
+    );
+    expect(txn.assetFreeze.frozen).toBe(true);
+  });
+
+  it("should build an application opt-in call with the correct onComplete and appIndex", async () => {
+    const txns = await localnet
+      .composer()
+      .addAppOptIn({ sender, appID: appId })
+      .buildGroupOffline();
+
+    const txn = getTxn(txns, 0).txn;
+    if (!txn.applicationCall)
+      throw new Error("Expected application call transaction");
+    expect(txn.applicationCall.onComplete).toBe(
+      algosdk.OnApplicationComplete.OptInOC,
+    );
+    expect(txn.applicationCall.appIndex).toBe(appId);
+  });
+
+  it("should build an application call with appID normalized to appIndex", async () => {
+    const txns = await localnet
+      .composer()
+      .addAppCall({
+        sender,
+        appID: appId,
+        onComplete: algosdk.OnApplicationComplete.NoOpOC,
+        appArgs: [new TextEncoder().encode("hello")],
+      })
+      .buildGroupOffline();
+
+    const txn = getTxn(txns, 0).txn;
+    if (!txn.applicationCall)
+      throw new Error("Expected application call transaction");
+    expect(txn.applicationCall.appIndex).toBe(appId);
+    expect(txn.applicationCall.onComplete).toBe(
+      algosdk.OnApplicationComplete.NoOpOC,
+    );
+    expect(txn.applicationCall.appArgs.length).toBe(1);
+  });
+
+  it("should build each app call variant with its own onComplete", async () => {
+    const cases: Array<[string, (c: Composer) => void, number]> = [
+      ["addAppUpdate", (c) => c.addAppUpdate({ sender, appID: appId }), 4],
+      ["addAppDelete", (c) => c.addAppDelete({ sender, appID: appId }), 5],
+      ["addAppCloseOut", (c) => c.addAppCloseOut({ sender, appID: appId }), 2],
+      ["addAppClearState", (c) => c.addAppClearState({ sender, appID: appId }), 3],
+      ["addAppNoOp", (c) => c.addAppNoOp({ sender, appID: appId }), 0],
+    ];
+
+    for (const [name, build, onComplete] of cases) {
+      const composer = localnet.composer();
+      build(composer);
+      const txns = await composer.buildGroupOffline();
+      const txn = getTxn(txns, 0).txn;
+      if (!txn.applicationCall)
+        throw new Error(`Expected application call transaction for ${name}`);
+      expect(txn.applicationCall.onComplete).toBe(onComplete);
+    }
+  });
+
+  it("should build a bare application create with addAppCreate", async () => {
+    const txns = await localnet
+      .composer()
+      .addAppCreate({
+        sender,
+        approvalProgram: new Uint8Array([0x01]),
+        clearProgram: new Uint8Array([0x01]),
+      })
+      .buildGroupOffline();
+
+    const txn = getTxn(txns, 0).txn;
+    if (!txn.applicationCall)
+      throw new Error("Expected application call transaction");
+    expect(txn.applicationCall.appIndex).toBe(0n);
+    expect(txn.applicationCall.onComplete).toBe(
+      algosdk.OnApplicationComplete.NoOpOC,
     );
   });
 });
