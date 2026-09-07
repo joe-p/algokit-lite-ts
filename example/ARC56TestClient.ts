@@ -1,3 +1,4 @@
+/* eslint-disable */
 import algosdk from "algosdk";
 import {
   ARC56AppClient,
@@ -5,6 +6,7 @@ import {
   type CreateMethodParams,
   type MethodParams,
   type MethodExecutionResult,
+  type PaymentParams,
   type ARC56Contract,
 } from "algokit-lite";
 

@@ -1,13 +1,15 @@
 // Bun Snapshot v1, https://bun.sh/docs/test/snapshots
 
 exports[`ARC56Generator should match snapshot for the full generated typed client 1`] = `
-"import algosdk from "algosdk";
+"/* eslint-disable */
+import algosdk from "algosdk";
 import {
   ARC56AppClient,
   type AppClientMethodParams,
   type CreateMethodParams,
   type MethodParams,
   type MethodExecutionResult,
+  type PaymentParams,
   type ARC56Contract,
 } from "algokit-lite";
 

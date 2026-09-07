@@ -166,6 +166,41 @@ export class Composer<TReturns extends unknown[] = []> {
     };
   }
 
+  /**
+   * Convert a method argument that an ABI method expects to be a transaction
+   * into a TransactionWithSigner. A `pay` argument may be supplied as a
+   * PaymentParams object, in which case this builder constructs the payment
+   * transaction. All other transaction types must already be built.
+   */
+  private async buildTxnArg(
+    arg: unknown,
+    argType: string,
+  ): Promise<{
+    arg: algosdk.TransactionWithSigner;
+    txnInfo?: { maxUsage?: bigint };
+  }> {
+    if (algosdk.isTransactionWithSigner(arg)) {
+      return { arg, txnInfo: {} };
+    }
+
+    if (argType === "pay") {
+      const paymentParams = arg as PaymentParams;
+      const sdkParams = await this.getSdkParams(paymentParams);
+      const txn = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+        ...paymentParams,
+        ...sdkParams,
+      });
+      return {
+        arg: { txn, signer: sdkParams.signer },
+        txnInfo: { maxUsage: paymentParams.maxUsage },
+      };
+    }
+
+    throw new Error(
+      `Unsupported transaction type "${argType}" for method argument. Expected a TransactionWithSigner.`,
+    );
+  }
+
   add(params: TransactionParams) {
     this.pendingParams.push(params);
     return this;
@@ -354,6 +389,18 @@ export class Composer<TReturns extends unknown[] = []> {
           );
           const rawArgs = p.method.methodArgs ?? [];
           const encodedArgs = encodeMethodArgs(arc56, arc56Method, rawArgs);
+          // ABI methods can take transactions as arguments (e.g. `pay`).
+          // Let the caller pass a PaymentParams object and build the
+          // transaction here, where we have access to the composer's params.
+          for (let i = 0; i < rawArgs.length; i++) {
+            const argType = arc56Method.args[i]?.type;
+            if (!algosdk.abiTypeIsTransaction(argType)) continue;
+            const built = await this.buildTxnArg(rawArgs[i], argType);
+            encodedArgs[i] = built.arg;
+            if (built.txnInfo !== undefined) {
+              this.txnInfo.push(built.txnInfo);
+            }
+          }
 
           let boxes = p.method.boxes;
           if (boxes === undefined && arc56Method.recommendations?.boxes) {

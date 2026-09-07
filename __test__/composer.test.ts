@@ -183,6 +183,48 @@ describe("Composer ARC56", () => {
     });
   });
 
+  it("should build a payment transaction from PaymentParams passed as a pay method argument", async () => {
+    const arc56WithPay: ARC56Contract = {
+      ...arc56,
+      methods: [
+        ...arc56.methods,
+        {
+          name: "deposit",
+          args: [{ name: "payment", type: "pay" }],
+          returns: { type: "void" },
+          actions: { create: [], call: ["NoOp"] },
+        },
+      ],
+    };
+
+    const composer = localnet.composer();
+    composer.addMethodCall({
+      arc56: arc56WithPay,
+      appID: appId,
+      method: "deposit",
+      sender,
+      methodArgs: [
+        { sender, receiver: sender.address, amount: 1_000_000n },
+      ],
+    });
+
+    const txns = await composer.buildGroupOffline();
+    expect(txns.length).toBe(2);
+
+    // The payment txn is added before the application call txn
+    const payTxn = getTxn(txns, 0);
+    if (!payTxn.txn.payment) throw new Error("Expected payment transaction");
+    expect(payTxn.txn.payment.amount).toBe(1_000_000n);
+    expect(payTxn.txn.payment.receiver.toString()).toBe(
+      sender.address.toString(),
+    );
+    expect(payTxn.signer).toBe(sender.txnSigner);
+
+    const appTxn = getTxn(txns, 1);
+    if (!appTxn.txn.applicationCall)
+      throw new Error("Expected application call transaction");
+  });
+
   it("should handle void return type method calls with ARC56", async () => {
     const user = await localnet.generateAccount({ fund: 10_000_000n });
     const composer = localnet.composer();
