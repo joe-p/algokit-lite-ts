@@ -13,6 +13,7 @@ import {
   encodeMethodArgs,
   getAbiMethod,
 } from "./arc56_utils";
+import { group } from "console";
 
 const USAGE_SCALE = 1_000_000n;
 export const BASE_USAGE = 1_000_000n;
@@ -253,6 +254,15 @@ export class Composer<TReturns extends unknown[] = []> {
     const groupResponse = simulateResponse.txnGroups[0];
     if (groupResponse === undefined) {
       throw Error("simulate did not include a group response");
+    }
+
+    let { failureMessage } = groupResponse;
+    if (failureMessage) {
+      if (failureMessage.includes("fees is less")) {
+        failureMessage +=
+          ". You need to increase maxUsage on one or more transactions";
+      }
+      throw new Error(failureMessage);
     }
 
     const { groupUsage, groupFeesPaid } = groupResponse;

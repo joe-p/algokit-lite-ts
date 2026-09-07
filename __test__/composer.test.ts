@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from "bun:test";
 import algosdk from "algosdk";
 import { Localnet } from "../src/localnet";
 import { ARC56AppClient } from "../src/arc56_client";
-import { Composer, type MethodResult } from "../src/composer";
+import { BASE_USAGE, Composer, type MethodResult } from "../src/composer";
 import type { ARC56Contract } from "../src/types/arc56";
 import arc56Json from "./fixtures/ARC56Test.arc56.json";
 
@@ -449,6 +449,44 @@ describe("Composer ARC56", () => {
       sum: 3n,
       difference: 5n,
     });
+  });
+
+  it("should cover a large transaction with a capped maxUsage", async () => {
+    const composer = new Composer({
+      getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
+    });
+
+    const txns = await composer
+      .addPayment({
+        sender,
+        receiver: sender.address,
+        amount: 0n,
+        note: new Uint8Array(4096),
+        maxUsage: BASE_USAGE + 308_000n,
+      })
+      .buildGroup(localnet.algod);
+
+    expect(getTxn(txns, 0).txn.fee).toBe(1_308n);
+  });
+
+  it("should throw error on not enough maxUsage", () => {
+    const composer = new Composer({
+      getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
+    });
+
+    expect(
+      composer
+        .addPayment({
+          sender,
+          receiver: sender.address,
+          amount: 0n,
+          note: new Uint8Array(4096),
+          maxUsage: BASE_USAGE + 1_000n,
+        })
+        .buildGroup(localnet.algod),
+    ).rejects.toThrow(
+      "You need to increase maxUsage on one or more transactions",
+    );
   });
 
   it("should let a zero-fee transaction be covered by another transaction's staticFee", async () => {
