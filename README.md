@@ -7,6 +7,9 @@ This library is a light wrapper around algosdk to make it easier to interact wit
 - Typed ARC56 app client generator
 - Localnet account generation and funding
 
+> [!IMPORTANT]
+> This library is a proof of concept and not recommended for production use. It is currently a testbed for features that may or may not be added to algosdk and/or algokit utils in the future.
+
 ## Why Not Utils?
 
 AlgoKit Lite is intentionally much simpler than AlgoKit utils. The abstractions are smaller and the amount of "magic" happening is lower. Some AlgoKit Lite interfaces are more verbose/explicit than AlgoKit Utils, but that is intentional. This makes it easier for agents to understand the library and for humans to review the code.
