@@ -114,7 +114,7 @@ composer.addPayment({
 This interface is implemented by the return value of the `addressWithSignersFromRaw...` functions in `algosdk`. For example, to sign with a falcon account:
 
 ```ts
-const { generateKey, signCompressed, verifyCompressed } = falcon1024;
+const { generateKey, signCompressed } = falcon1024;
 
 const { publicKey, privateKey } = falcon1024.generateKey();
 const falconSigningKey = {
