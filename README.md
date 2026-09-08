@@ -71,6 +71,66 @@ composer.addMethodCall({
 > [!NOTE]
 > In the future, there will also likely be some sort of maxMinFee field to limit the amount the sender is willing to pay per usage. This will be similar to how ETH wallets allow users to limit their gas price.
 
+### Sender and Signer
+
+#### Utils
+
+In AlgoKit Utils, the sender must be a `string | Address`. If the address is known by the AlgorandClient, then the `TransactionSigner` is implicit
+
+```ts
+const sender = algorand.account.random();
+const composer = algorand.newGroup();
+composer.addPayment({ sender, receiver, amount });
+```
+
+For accounts AlgorandClient does not know about, the `signer` must be explicitly attached
+
+```ts
+const { activeAddress, transactionSigner } = useWallet();
+composer.addPayment({
+  sender: activeAddress,
+  signer: transactionSigner,
+  receiver,
+  amount,
+});
+```
+
+#### Lite
+
+In AlgoKit Lite, the sender must always be a `ComposerSender`, which is defined as `AddressWithTransactionSigner & { emptyTxnSigner?: TransactionSigner }`
+
+```ts
+const { activeAddress, transactionSigner } = useWallet();
+composer.addPayment({
+  sender: { address: activeAddress, signer: transactionSigner },
+  receiver,
+  amount,
+});
+```
+
+This interface is implemented by the return value of the `addressWithSignersFromRaw...` functions in `algosdk`. For example, to sign with a falcon account:
+
+```ts
+const { generateKey, signCompressed, verifyCompressed } = falcon1024;
+
+const { publicKey, privateKey } = falcon1024.generateKey();
+const falconSigningKey = {
+  falcon1024PublicKey: publicKey,
+  falcon1024Signer: async (bytesToSign) =>
+    falcon1024.signCompressed(privateKey, bytesToSign),
+};
+
+const sender =
+  algosdk.addressWithSignersFromRawFalcon1024Signer(falconSigningKey);
+
+composer.addPayment({
+  sender,
+  receiver,
+  amount,
+  maxUsage: BASE_USAGE * 3n, // AlgoKit Lite will use the sender.emptyTxnSigner during simulate to get the fees required for the pqsig
+});
+```
+
 ## Typed Client Migration
 
 One of the main reasons projects use AlgoKit Utils is because of the typed client generator. AlgoKit Lite also offers a typed client generator that covers most of the features developers want (namely typed method calls) but there are some abstractions in the Utils version that are not implemented in the Lite version.
