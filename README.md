@@ -11,6 +11,8 @@ This library is a light wrapper around algosdk to make it easier to interact wit
 
 AlgoKit Lite is intentionally much simpler than AlgoKit utils. The abstractions are smaller and the amount of "magic" happening is lower. Some AlgoKit Lite interfaces are more verbose/explicit than AlgoKit Utils, but that is intentional. This makes it easier for agents to understand the library and for humans to review the code.
 
+Additionally, AlgoKit Lite uses some new features of algod to do things in a different and breaking way. For example, transactions in AlgoKit lite have a `maxUsage` field rather than a `extraFee` or `maxFee` field. This allows simulate to be used to determine transaction fees rather than relying on hardcoded values.
+
 ## Typed Client Migration
 
 One of the main reasons projects use AlgoKit Utils is because of the typed client generator. AlgoKit Lite also offers a typed client generator that covers most of the features developers want (namely typed method calls) but there are some abstractions in the Utils version that are not implemented in the Lite version.
