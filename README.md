@@ -13,6 +13,52 @@ AlgoKit Lite is intentionally much simpler than AlgoKit utils. The abstractions 
 
 Additionally, AlgoKit Lite uses some new features of algod to do things in a different and breaking way. For example, transactions in AlgoKit lite have a `maxUsage` field rather than a `extraFee` or `maxFee` field. This allows simulate to be used to determine transaction fees rather than relying on hardcoded values.
 
+## Composer Migration
+
+The general pattern of the composer for both AlgoKit Utils and Lite is more or less the same. The composer takes in transaction parameters and can optionally do some of the mundane work (like setting suggestedParams) under the hood.
+
+> [!WARNING]
+> The Lite composer currently does not do resource population, but this will definitely be added in the near future.
+
+### extraFee and maxFee
+
+#### Utils
+
+In AlgoKit utils you can use extraFee to hardcode extra fee to cover other transactions. A common use case is covering inner transactions on an app call.
+
+```ts
+// Send an app call with two inner transactions
+composer.addAppCallMethodCall({ sender, appId, args, method, extraFee: microAlgo(2_000) })
+```
+
+Alternatively, you can use the `maxFee` parameter in combination with `coverAppCallInnerTransactionFees` when sending. This will use simulate to add the required fee up to the required amount
+
+```ts
+composer.addAppCallMethodCall({ sender, appId, args, method, maxFee: microAlgo(3_000) })
+composer.send({ coverAppCallInnerTransactionFees: true })
+```
+
+The problem with this pattern is that it generally requires some assumptions to be made about fee prices which may change under congestion or with consensus updates.
+
+#### Lite
+
+Lite does not have a `maxFee` or `extraFee` field. Instead, it has a `maxUsage` parameter that defines the total *usage* of the application. The Lite composer uses simulate to determine a transaction's usage, which is then multiplied by the current minFee from algod. This avoids any assumptions needing to be made about fee prices.
+
+```ts
+import { BASE_USAGE, Composer } from "algokit-lite";
+
+ composer.addMethodCall({
+        sender,
+        arc56,
+        appID,
+        method,
+        maxUsage: BASE_USAGE * 3n, // equivalent to maxFee: 3_000n under normal network conditions
+      })
+```
+
+> [!NOTE]
+> In the future, there will also likely be some sort of maxMinFee field to limit the amount the sender is willing to pay per usage. This will be similar to how ETH wallets allow users to limit their gas price.
+
 ## Typed Client Migration
 
 One of the main reasons projects use AlgoKit Utils is because of the typed client generator. AlgoKit Lite also offers a typed client generator that covers most of the features developers want (namely typed method calls) but there are some abstractions in the Utils version that are not implemented in the Lite version.
