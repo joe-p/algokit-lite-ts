@@ -105,7 +105,7 @@ In AlgoKit Lite, the sender must always be a `ComposerSender`, which is defined 
 ```ts
 const { activeAddress, transactionSigner } = useWallet();
 composer.addPayment({
-  sender: { address: activeAddress, signer: transactionSigner },
+  sender: { address: activeAddress, txnSigner: transactionSigner },
   receiver,
   amount,
 });
