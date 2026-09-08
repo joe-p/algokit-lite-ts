@@ -28,32 +28,44 @@ In AlgoKit utils you can use extraFee to hardcode extra fee to cover other trans
 
 ```ts
 // Send an app call with two inner transactions
-composer.addAppCallMethodCall({ sender, appId, args, method, extraFee: microAlgo(2_000) })
+composer.addAppCallMethodCall({
+  sender,
+  appId,
+  args,
+  method,
+  extraFee: microAlgo(2_000),
+});
 ```
 
 Alternatively, you can use the `maxFee` parameter in combination with `coverAppCallInnerTransactionFees` when sending. This will use simulate to add the required fee up to the required amount
 
 ```ts
-composer.addAppCallMethodCall({ sender, appId, args, method, maxFee: microAlgo(3_000) })
-composer.send({ coverAppCallInnerTransactionFees: true })
+composer.addAppCallMethodCall({
+  sender,
+  appId,
+  args,
+  method,
+  maxFee: microAlgo(3_000),
+});
+composer.send({ coverAppCallInnerTransactionFees: true });
 ```
 
 The problem with this pattern is that it generally requires some assumptions to be made about fee prices which may change under congestion or with consensus updates.
 
 #### Lite
 
-Lite does not have a `maxFee` or `extraFee` field. Instead, it has a `maxUsage` parameter that defines the total *usage* of the application. The Lite composer uses simulate to determine a transaction's usage, which is then multiplied by the current minFee from algod. This avoids any assumptions needing to be made about fee prices.
+Lite does not have a `maxFee` or `extraFee` field. Instead, it has a `maxUsage` parameter that defines the total _usage_ of the application. The Lite composer uses simulate to determine a transaction's usage, which is then multiplied by the current minFee from algod. This avoids any assumptions needing to be made about fee prices.
 
 ```ts
 import { BASE_USAGE, Composer } from "algokit-lite";
 
- composer.addMethodCall({
-        sender,
-        arc56,
-        appID,
-        method,
-        maxUsage: BASE_USAGE * 3n, // equivalent to maxFee: 3_000n under normal network conditions
-      })
+composer.addMethodCall({
+  sender,
+  arc56,
+  appID,
+  method,
+  maxUsage: BASE_USAGE * 3n, // equivalent to maxFee: 3_000n under normal network conditions
+});
 ```
 
 > [!NOTE]
