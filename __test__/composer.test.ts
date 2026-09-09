@@ -445,6 +445,7 @@ describe("Composer ARC56", () => {
   it("should cover a zero-fee transaction with a capped maxUsage", async () => {
     const composer = new Composer({
       getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
+      maxUsage: new Map([[sender.address, 3_000_000n]]),
     });
 
     const txns = await composer
@@ -459,7 +460,6 @@ describe("Composer ARC56", () => {
         appID: appId,
         method: "foo",
         sender,
-        maxUsage: 3_000_000n,
         methodArgs: [{ add: { a: 1n, b: 2n }, subtract: { a: 10n, b: 5n } }],
       })
       .buildGroup(localnet.algod);
@@ -479,6 +479,7 @@ describe("Composer ARC56", () => {
   it("should cover a large transaction with a capped maxUsage", async () => {
     const composer = new Composer({
       getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
+      maxUsage: new Map([[sender.address, BASE_USAGE + 308_000n]]),
     });
 
     const txns = await composer
@@ -487,7 +488,6 @@ describe("Composer ARC56", () => {
         receiver: sender.address,
         amount: 0n,
         note: new Uint8Array(4096),
-        maxUsage: BASE_USAGE + 308_000n,
       })
       .buildGroup(localnet.algod);
 
@@ -507,6 +507,7 @@ describe("Composer ARC56", () => {
       algosdk.addressWithSignersFromRawFalcon1024Signer(emptyFalcon);
     const composer = new Composer({
       getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
+      maxUsage: new Map([[pqSender.address, BASE_USAGE * 3n]]),
     });
     await localnet.fundAccount(pqSender.address, 1_000_000n);
 
@@ -515,7 +516,6 @@ describe("Composer ARC56", () => {
         sender: pqSender,
         receiver: sender.address,
         amount: 0n,
-        maxUsage: BASE_USAGE * 3n,
       })
       .buildGroup(localnet.algod);
 
@@ -525,6 +525,7 @@ describe("Composer ARC56", () => {
   it("should throw error on not enough maxUsage", () => {
     const composer = new Composer({
       getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
+      maxUsage: new Map([[sender.address, BASE_USAGE + 1_000n]]),
     });
 
     expect(
@@ -534,12 +535,38 @@ describe("Composer ARC56", () => {
           receiver: sender.address,
           amount: 0n,
           note: new Uint8Array(4096),
-          maxUsage: BASE_USAGE + 1_000n,
         })
         .buildGroup(localnet.algod),
     ).rejects.toThrow(
-      "You need to increase maxUsage on one or more transactions",
+      "You need to increase the maxUsage of one or more accounts",
     );
+  });
+
+  it("should share one account's maxUsage across its whole group", async () => {
+    const payer = await localnet.generateAccount({ fund: 10_000_000n });
+    const composer = new Composer({
+      getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
+
+      maxUsage: new Map([[payer.address, (BASE_USAGE + 308_000n) * 2n]]),
+    });
+
+    const grp = await composer
+      .addPayment({
+        sender: payer,
+        receiver: payer.address,
+        amount: 0n,
+        note: new Uint8Array(4096),
+      })
+      .addPayment({
+        sender: payer,
+        receiver: payer.address,
+        amount: 1n,
+        note: new Uint8Array(4096),
+      })
+      .buildGroup(localnet.algod);
+
+    expect(getTxn(grp, 0).txn.fee).toBe(2_615n);
+    expect(getTxn(grp, 1).txn.fee).toBe(0n);
   });
 
   it("should let a zero-fee transaction be covered by another transaction's staticFee", async () => {

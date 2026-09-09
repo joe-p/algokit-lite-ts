@@ -4,6 +4,7 @@ import algosdk, {
   AtomicTransactionComposerStatus,
   OnApplicationComplete,
   SignedTransaction,
+  type Address,
   type AddressWithTransactionSigner,
   type SuggestedParams,
   type TransactionSigner,
@@ -27,8 +28,15 @@ export type ComposerSender = AddressWithTransactionSigner & {
   emptyTxnSigner?: TransactionSigner;
 };
 
+/**
+ * Total usage each account is willing to pay for in the entire group, keyed by
+ * the account's `Address` (the `sender.address` of its transactions).
+ */
+export type AccountMaxUsage = Map<Address, bigint>;
+
 type TxnInfo = {
-  maxUsage?: bigint;
+  /** Transactions where the account covers the whole group's fees are fixed */
+  feeFixed: boolean;
   sender: ComposerSender;
 };
 
@@ -41,12 +49,6 @@ type ParamOverrides = {
    * for the transaction that covers them.
    */
   staticFee?: bigint;
-  /**
-   * Let this transaction's fee rise to cover up to this much group usage, so it
-   * can pay for other transactions in the group that pay nothing themselves.
-   * One transaction's worth of usage is `BASE_USAGE`.
-   */
-  maxUsage?: bigint;
 };
 
 type OverriddenParams = Pick<
@@ -183,10 +185,24 @@ export interface ComposerExecuteResult<TReturns extends unknown[] = unknown[]> {
   methodResults: MethodResults<TReturns>;
 }
 
+export type ComposerOpts = {
+  getSuggestedParams?: () => Promise<SuggestedParams>;
+  /**
+   * The total usage each account is willing to pay for in the entire group,
+   * keyed by the account's `Address`. The composer uses simulate to determine
+   * the group's usage, then raises fees so that no account pays more than its
+   * `feeForUsage(maxUsage)` share across all of its transactions. Accounts not
+   * in the map default to covering at most their own transactions' usage
+   * (`BASE_USAGE` each).
+   */
+  maxUsage?: AccountMaxUsage;
+};
+
 export class Composer<TReturns extends unknown[] = []> {
   private atc: AtomicTransactionComposer = new AtomicTransactionComposer();
   private pendingParams: TransactionParams[] = [];
   private txnInfo: TxnInfo[] = [];
+  private maxUsage?: AccountMaxUsage;
 
   /**
    * Called once per transaction that does not carry its own suggestedParams.
@@ -194,8 +210,9 @@ export class Composer<TReturns extends unknown[] = []> {
    */
   getSuggestedParams?: () => Promise<SuggestedParams>;
 
-  constructor(opts: { getSuggestedParams?: () => Promise<SuggestedParams> }) {
+  constructor(opts: ComposerOpts = {}) {
     this.getSuggestedParams = opts.getSuggestedParams;
+    this.maxUsage = opts.maxUsage;
   }
 
   private async getSdkParams(
@@ -211,13 +228,11 @@ export class Composer<TReturns extends unknown[] = []> {
       );
     }
 
-    if (params.staticFee !== undefined) {
-      suggestedParams = {
-        ...suggestedParams,
-        fee: params.staticFee,
-        flatFee: true,
-      };
-    }
+    suggestedParams = {
+      ...suggestedParams,
+      fee: params.staticFee ?? 0n,
+      flatFee: true,
+    };
 
     return {
       sender: sender.address,
@@ -242,7 +257,10 @@ export class Composer<TReturns extends unknown[] = []> {
     if (algosdk.isTransactionWithSigner(arg)) {
       return {
         arg,
-        txnInfo: { sender: { address: arg.txn.sender, txnSigner: arg.signer } },
+        txnInfo: {
+          feeFixed: true,
+          sender: { address: arg.txn.sender, txnSigner: arg.signer },
+        },
       };
     }
 
@@ -256,7 +274,7 @@ export class Composer<TReturns extends unknown[] = []> {
       return {
         arg: { txn, signer: sdkParams.signer },
         txnInfo: {
-          maxUsage: paymentParams.maxUsage,
+          feeFixed: paymentParams.staticFee !== undefined,
           sender: paymentParams.sender,
         },
       };
@@ -415,17 +433,35 @@ export class Composer<TReturns extends unknown[] = []> {
     const simTxns = simAtc.buildGroup().map((t) => t.txn);
     let addedFees = 0n;
 
+    // The max fee each account is willing to pay in total across the group.
+    // Accounts not in the maxUsage map default to covering no more than their
+    // own transactions' base usage.
+    const budgets = new Map<string, bigint>();
+    for (const [address, usage] of this.maxUsage ?? []) {
+      budgets.set(address.toString(), feeForUsage(usage, minFee));
+    }
+    const txnCountPerSender = new Map<string, number>();
+    for (const txn of simTxns) {
+      const key = txn.sender.toString();
+      txnCountPerSender.set(key, (txnCountPerSender.get(key) ?? 0) + 1);
+    }
+    for (const [key, count] of txnCountPerSender) {
+      if (budgets.has(key)) continue;
+      budgets.set(key, feeForUsage(BASE_USAGE * BigInt(count), minFee));
+    }
+
     // Simulate will fail if it doesn't have enough fees, so we will
-    // max out the fees on each txn before simulating
+    // max out the fees on each txn before simulating, up to its account's
+    // total budget
+    const remaining = new Map(budgets);
     for (const [i, txn] of simTxns.entries()) {
-      const maxUsage = this.txnInfo[i]?.maxUsage;
-      if (maxUsage) {
-        const maxFee = feeForUsage(maxUsage, minFee);
-        if (maxFee > txn.fee) {
-          addedFees += maxFee - txn.fee;
-          txn.fee = maxFee;
-        }
-      }
+      if (this.txnInfo[i]?.feeFixed) continue;
+      const budget = remaining.get(txn.sender.toString());
+
+      if (budget === undefined || budget <= txn.fee) continue;
+      addedFees += budget - txn.fee;
+      txn.fee = budget;
+      remaining.set(txn.sender.toString(), 0n);
     }
 
     Composer.regroup(simTxns);
@@ -462,7 +498,7 @@ export class Composer<TReturns extends unknown[] = []> {
     if (failureMessage) {
       if (failureMessage.includes("fees is less")) {
         failureMessage +=
-          ". You need to increase maxUsage on one or more transactions";
+          ". You need to increase the maxUsage of one or more accounts";
       }
       throw new Error(failureMessage);
     }
@@ -478,7 +514,8 @@ export class Composer<TReturns extends unknown[] = []> {
 
     const txns = this.atc.buildGroup().map((t) => t.txn);
 
-    // Distribute the required group fee across the transactions
+    // Distribute the required group fee across the transactions so that no
+    // account pays more than its maxUsage budget in total across the group.
     //
     // Right now it just starts at index 0 and keeps adding fees until its done
     // This means that txns in the beginning of the group may end up paying more
@@ -493,19 +530,32 @@ export class Composer<TReturns extends unknown[] = []> {
     // contribute a lot to the group fees don't need to pay much extra
     //
     // 3. Some combination of the above
-    for (const [i, txn] of txns.entries()) {
-      const maxUsage = this.txnInfo[i]?.maxUsage;
-      if (maxUsage) {
-        const maxFee = feeForUsage(maxUsage, minFee);
-        if (maxFee > txn.fee) {
-          const maxAddable = maxFee - txn.fee;
-          const amountToAdd = feeNeeded < maxAddable ? feeNeeded : maxAddable;
-          txn.fee += amountToAdd;
-          feeNeeded -= amountToAdd;
-        }
+
+    // Subtract what each account's transactions already pay (their own fees)
+    // from its budget, leaving how much more it is willing to contribute
+    for (const txn of txns) {
+      const budget = budgets.get(txn.sender.toString());
+      if (budget !== undefined && budget > 0n) {
+        budgets.set(txn.sender.toString(), budget - txn.fee);
       }
+    }
+
+    for (const [i, txn] of txns.entries()) {
+      if (this.txnInfo[i]?.feeFixed) continue;
+      const budget = budgets.get(txn.sender.toString());
+      if (budget === undefined || budget <= 0n) continue;
+      const amountToAdd = feeNeeded < budget ? feeNeeded : budget;
+      txn.fee += amountToAdd;
+      budgets.set(txn.sender.toString(), budget - amountToAdd);
+      feeNeeded -= amountToAdd;
 
       if (feeNeeded === 0n) break;
+    }
+
+    if (feeNeeded > 0n) {
+      throw new Error(
+        "You need to increase the maxUsage of one or more accounts",
+      );
     }
 
     // Fees changed after the group was built, so the group ID must be recomputed
@@ -522,6 +572,10 @@ export class Composer<TReturns extends unknown[] = []> {
       if ("txn" in p) {
         // Already built, so its fee is fixed and cannot cover anything else
         atc.addTransaction(p.txn);
+        this.txnInfo.push({
+          feeFixed: true,
+          sender: { address: p.txn.txn.sender, txnSigner: p.txn.signer },
+        });
         continue;
       }
 
@@ -676,6 +730,7 @@ export class Composer<TReturns extends unknown[] = []> {
             for (const arg of methodArgs) {
               if (typeof arg === "object" && "txn" in arg) {
                 this.txnInfo.push({
+                  feeFixed: true,
                   sender: { address: arg.txn.sender, txnSigner: arg.signer },
                 });
               }
@@ -690,8 +745,8 @@ export class Composer<TReturns extends unknown[] = []> {
         }
       } else throw Error("Unsupported transaction params");
 
-      const { maxUsage, sender } = paramOverridesOf(p);
-      this.txnInfo.push({ maxUsage, sender });
+      const { sender, staticFee } = paramOverridesOf(p);
+      this.txnInfo.push({ feeFixed: staticFee !== undefined, sender });
     }
 
     if (algod) {
