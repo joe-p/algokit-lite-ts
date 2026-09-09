@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from "bun:test";
 import algosdk, { type Falcon1024SigningKey } from "algosdk";
 import { Localnet } from "../src/localnet";
 import { ARC56AppClient } from "../src/arc56_client";
-import { BASE_USAGE, Composer, type MethodResult } from "../src/composer";
+import { Composer, type MethodResult } from "../src/composer";
 import type { ARC56Contract } from "../src/types/arc56";
 import arc56Json from "./fixtures/ARC56Test.arc56.json";
 
@@ -442,7 +442,7 @@ describe("Composer ARC56", () => {
     expect(getTxn(txns, 1).txn.fee).toBe(5_000n);
   });
 
-  it("should cover a zero-fee transaction with a capped maxUsage", async () => {
+  it("should cover a zero-fee transaction with feePercent: 1", async () => {
     const composer = new Composer({
       getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
     });
@@ -452,14 +452,14 @@ describe("Composer ARC56", () => {
         sender,
         receiver: sender.address,
         amount: 0n,
-        staticFee: 0n,
+        feePercent: 0,
       })
       .addMethodCall({
         arc56,
         appID: appId,
         method: "foo",
         sender,
-        maxUsage: 3_000_000n,
+        feePercent: 1,
         methodArgs: [{ add: { a: 1n, b: 2n }, subtract: { a: 10n, b: 5n } }],
       })
       .buildGroup(localnet.algod);
@@ -476,7 +476,7 @@ describe("Composer ARC56", () => {
     });
   });
 
-  it("should cover a large transaction with a capped maxUsage", async () => {
+  it("should cover a large transaction with feePercent: 1", async () => {
     const composer = new Composer({
       getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
     });
@@ -487,14 +487,14 @@ describe("Composer ARC56", () => {
         receiver: sender.address,
         amount: 0n,
         note: new Uint8Array(4096),
-        maxUsage: BASE_USAGE + 308_000n,
+        feePercent: 1,
       })
       .buildGroup(localnet.algod);
 
     expect(getTxn(txns, 0).txn.fee).toBe(1_308n);
   });
 
-  it("should cover a pqsig transaction with a capped maxUsage", async () => {
+  it("should cover a pqsig transaction with a capped feePercent: 1", async () => {
     const emptyFalcon: Falcon1024SigningKey = {
       falcon1024PublicKey: new Uint8Array(),
       // eslint-disable-next-line @typescript-eslint/require-await, @typescript-eslint/no-unused-vars
@@ -515,14 +515,40 @@ describe("Composer ARC56", () => {
         sender: pqSender,
         receiver: sender.address,
         amount: 0n,
-        maxUsage: BASE_USAGE * 3n,
+        feePercent: 1,
       })
       .buildGroup(localnet.algod);
 
     expect(getTxn(txns, 0).txn.fee).toBe(3_000n);
   });
 
-  it("should throw error on not enough maxUsage", () => {
+  it("should distribute the group fee across transactions that don't specify feePercent", async () => {
+    const composer = new Composer({
+      getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
+    });
+
+    const txns = await composer
+      .addPayment({
+        sender,
+        receiver: sender.address,
+        amount: 0n,
+        note: new Uint8Array(2048),
+      })
+      .addPayment({
+        sender,
+        receiver: sender.address,
+        amount: 0n,
+        note: new Uint8Array(2048),
+      })
+      .buildGroup(localnet.algod);
+
+    const fee0 = getTxn(txns, 0).txn.fee;
+    const fee1 = getTxn(txns, 1).txn.fee;
+    expect(fee0).toBe(fee1);
+    expect(fee0).toBeGreaterThan(0n);
+  });
+
+  it("should throw error when feePercent values don't sum to 1", () => {
     const composer = new Composer({
       getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
     });
@@ -533,13 +559,16 @@ describe("Composer ARC56", () => {
           sender,
           receiver: sender.address,
           amount: 0n,
-          note: new Uint8Array(4096),
-          maxUsage: BASE_USAGE + 1_000n,
+          feePercent: 0.5,
+        })
+        .addPayment({
+          sender,
+          receiver: sender.address,
+          amount: 0n,
+          feePercent: 0.25,
         })
         .buildGroup(localnet.algod),
-    ).rejects.toThrow(
-      "You need to increase maxUsage on one or more transactions",
-    );
+    ).rejects.toThrow("feePercent across the group must sum to 1");
   });
 
   it("should let a zero-fee transaction be covered by another transaction's staticFee", async () => {
