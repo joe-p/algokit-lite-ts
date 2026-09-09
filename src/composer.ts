@@ -28,7 +28,7 @@ export type ComposerSender = AddressWithTransactionSigner & {
 };
 
 type TxnInfo = {
-  maxUsage?: bigint;
+  feePercent?: number;
   sender: ComposerSender;
 };
 
@@ -41,12 +41,7 @@ type ParamOverrides = {
    * for the transaction that covers them.
    */
   staticFee?: bigint;
-  /**
-   * Let this transaction's fee rise to cover up to this much group usage, so it
-   * can pay for other transactions in the group that pay nothing themselves.
-   * One transaction's worth of usage is `BASE_USAGE`.
-   */
-  maxUsage?: bigint;
+  feePercent?: number;
 };
 
 type OverriddenParams = Pick<
@@ -211,13 +206,11 @@ export class Composer<TReturns extends unknown[] = []> {
       );
     }
 
-    if (params.staticFee !== undefined) {
-      suggestedParams = {
-        ...suggestedParams,
-        fee: params.staticFee,
-        flatFee: true,
-      };
-    }
+    suggestedParams = {
+      ...suggestedParams,
+      fee: params.staticFee ?? 0n,
+      flatFee: true,
+    };
 
     return {
       sender: sender.address,
@@ -256,7 +249,7 @@ export class Composer<TReturns extends unknown[] = []> {
       return {
         arg: { txn, signer: sdkParams.signer },
         txnInfo: {
-          maxUsage: paymentParams.maxUsage,
+          feePercent: paymentParams.feePercent,
           sender: paymentParams.sender,
         },
       };
@@ -411,31 +404,41 @@ export class Composer<TReturns extends unknown[] = []> {
 
   private async simulateForInfo(algod: Algodv2) {
     const minFee = (await algod.getTransactionParams().do()).minFee;
-    const simAtc = this.atc.clone();
-    const simTxns = simAtc.buildGroup().map((t) => t.txn);
-    let addedFees = 0n;
+    const clonedTxns = this.atc.clone().buildGroup();
+    const simAtc = new AtomicTransactionComposer();
+    const extraFees = 100_000n;
 
-    // Simulate will fail if it doesn't have enough fees, so we will
-    // max out the fees on each txn before simulating
-    for (const [i, txn] of simTxns.entries()) {
-      const maxUsage = this.txnInfo[i]?.maxUsage;
-      if (maxUsage) {
-        const maxFee = feeForUsage(maxUsage, minFee);
-        if (maxFee > txn.fee) {
-          addedFees += maxFee - txn.fee;
-          txn.fee = maxFee;
-        }
+    if (this.txnInfo.find((t) => t.feePercent !== undefined) === undefined) {
+      for (const info of this.txnInfo) {
+        info.feePercent = 1 / this.txnInfo.length;
+      }
+    } else {
+      const total = this.txnInfo.reduce(
+        (sum, t) => sum + (t.feePercent ?? 0),
+        0,
+      );
+      if (Math.abs(total - 1) > 1e-9) {
+        throw new Error(
+          `feePercent across the group must sum to 1, but sums to ${total}`,
+        );
       }
     }
 
-    Composer.regroup(simTxns);
+    for (const [idx, simTxn] of clonedTxns.entries()) {
+      if (idx === 0) {
+        simTxn.txn.fee += extraFees;
+      }
+      delete simTxn.txn.group;
+      simAtc.addTransaction(simTxn);
+    }
 
-    const signedSimTxns = simTxns.map(async (txn, i) => {
+    const signedSimTxns = simAtc.buildGroup().map(async (txn, i) => {
       const emptySigner = this.txnInfo[i]?.sender.emptyTxnSigner;
       if (emptySigner) {
-        return (await algosdk.signTransactionWithSigner(txn, emptySigner)).stxn;
+        return (await algosdk.signTransactionWithSigner(txn.txn, emptySigner))
+          .stxn;
       } else {
-        return new SignedTransaction({ txn });
+        return new SignedTransaction({ txn: txn.txn });
       }
     });
 
@@ -470,42 +473,18 @@ export class Composer<TReturns extends unknown[] = []> {
     const { groupUsage, groupFeesPaid } = groupResponse;
 
     const usage = BigInt(groupUsage ?? 0);
-    const paid = BigInt(groupFeesPaid ?? 0) - addedFees;
+    const paid = BigInt(groupFeesPaid ?? 0) - extraFees;
 
     const requiredFees = feeForUsage(usage, minFee);
-    let feeNeeded = requiredFees > paid ? requiredFees - paid : 0n;
+    const feeNeeded = requiredFees > paid ? requiredFees - paid : 0n;
     if (feeNeeded === 0n) return;
 
     const txns = this.atc.buildGroup().map((t) => t.txn);
 
-    // Distribute the required group fee across the transactions
-    //
-    // Right now it just starts at index 0 and keeps adding fees until its done
-    // This means that txns in the beginning of the group may end up paying more
-    // than at the end (if they all have the same max usage)
-    //
-    // Some alternatives
-    //
-    // 1. Increase fees in proportion to the txns maxUsage. Higher maxUsage pays more, but
-    // all txns still contribute
-    //
-    // 2. Increase fees inversely proportional to the txns flat fee. Txns that already
-    // contribute a lot to the group fees don't need to pay much extra
-    //
-    // 3. Some combination of the above
     for (const [i, txn] of txns.entries()) {
-      const maxUsage = this.txnInfo[i]?.maxUsage;
-      if (maxUsage) {
-        const maxFee = feeForUsage(maxUsage, minFee);
-        if (maxFee > txn.fee) {
-          const maxAddable = maxFee - txn.fee;
-          const amountToAdd = feeNeeded < maxAddable ? feeNeeded : maxAddable;
-          txn.fee += amountToAdd;
-          feeNeeded -= amountToAdd;
-        }
-      }
-
-      if (feeNeeded === 0n) break;
+      const percentage = this.txnInfo[i]?.feePercent;
+      if (percentage === undefined) continue;
+      txn.fee += BigInt(Math.ceil(percentage * Number(feeNeeded)));
     }
 
     // Fees changed after the group was built, so the group ID must be recomputed
@@ -690,8 +669,8 @@ export class Composer<TReturns extends unknown[] = []> {
         }
       } else throw Error("Unsupported transaction params");
 
-      const { maxUsage, sender } = paramOverridesOf(p);
-      this.txnInfo.push({ maxUsage, sender });
+      const { feePercent, sender } = paramOverridesOf(p);
+      this.txnInfo.push({ feePercent, sender });
     }
 
     if (algod) {

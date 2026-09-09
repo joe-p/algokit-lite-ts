@@ -14,7 +14,7 @@ This library is a light wrapper around algosdk to make it easier to interact wit
 
 AlgoKit Lite is intentionally much simpler than AlgoKit utils. The abstractions are smaller and the amount of "magic" happening is lower. Some AlgoKit Lite interfaces are more verbose/explicit than AlgoKit Utils, but that is intentional. This makes it easier for agents to understand the library and for humans to review the code.
 
-Additionally, AlgoKit Lite uses some new features of algod to do things in a different and breaking way. For example, transactions in AlgoKit lite have a `maxUsage` field rather than a `extraFee` or `maxFee` field. This allows simulate to be used to determine transaction fees rather than relying on hardcoded values.
+Additionally, AlgoKit Lite uses some new features of algod to do things in a different and breaking way. For example, transactions in AlgoKit lite have a `feePercent` field rather than an `extraFee` or `maxFee` field. This allows simulate to be used to determine transaction fees rather than relying on hardcoded values.
 
 ## Composer Migration
 
@@ -57,22 +57,22 @@ The problem with this pattern is that it generally requires some assumptions to 
 
 #### Lite
 
-Lite does not have a `maxFee` or `extraFee` field. Instead, it has a `maxUsage` parameter that defines the total _usage_ of the application. The Lite composer uses simulate to determine a transaction's usage, which is then multiplied by the current minFee from algod. This avoids any assumptions needing to be made about fee prices.
+Lite does not have a `maxFee` or `extraFee` field. Instead, each transaction has a `feePercent` parameter that defines what proportion of the group's total fee that transaction pays. The Lite composer uses simulate to determine the group's total fee, which is then split across the transactions according to their `feePercent`. This avoids any assumptions needing to be made about fee prices.
 
 ```ts
-import { BASE_USAGE, Composer } from "algokit-lite";
+import { Composer } from "algokit-lite";
 
 composer.addMethodCall({
   sender,
   arc56,
   appID,
   method,
-  maxUsage: BASE_USAGE * 3n, // equivalent to maxFee: 3_000n under normal network conditions
+  feePercent: 1, // this transaction pays the entire group fee
 });
 ```
 
 > [!NOTE]
-> In the future, there will also likely be some sort of maxMinFee field to limit the amount the sender is willing to pay per usage. This will be similar to how ETH wallets allow users to limit their gas price.
+> The `feePercent` values across a group must sum to 1. If no transaction in the group specifies `feePercent`, they all default to `1 / n` (an equal split). To make a specific transaction pay nothing, give it `feePercent: 0`. Pre-built transactions added with `addTransaction` always pay their own fixed fee and never contribute to other transactions.
 
 ### Sender and Signer
 
@@ -130,7 +130,7 @@ composer.addPayment({
   sender,
   receiver,
   amount,
-  maxUsage: BASE_USAGE * 3n, // AlgoKit Lite will use the sender.emptyTxnSigner during simulate to get the fees required for the pqsig
+  feePercent: 1, // AlgoKit Lite will use the sender.emptyTxnSigner during simulate to get the fees required for the pqsig
 });
 ```
 

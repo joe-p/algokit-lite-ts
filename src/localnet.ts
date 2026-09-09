@@ -63,7 +63,12 @@ export class Localnet {
 
   async fundAccount(receiver: algosdk.Address, amount: bigint) {
     return await this.composer()
-      .addPayment({ sender: await this.dispenser(), receiver, amount })
+      .addPayment({
+        sender: await this.dispenser(),
+        receiver,
+        amount,
+        feePercent: 1,
+      })
       .execute(this.algod);
   }
 
