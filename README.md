@@ -72,7 +72,7 @@ composer.addMethodCall({
 ```
 
 > [!NOTE]
-> The `feePercent` values across a group must sum to 1. If no transaction in the group specifies `feePercent`, they all default to `1 / n` (an equal split). To make a specific transaction pay nothing, give it `feePercent: 0`. Pre-built transactions added with `addTransaction` always pay their own fixed fee and never contribute to other transactions.
+> The `feePercent` values across a group must sum to 1. If no transaction in the group specifies `feePercent`, they all default to `1 / n` (an equal split). To make a specific transaction pay nothing, give it `feePercent: 0`. Transactions with a `staticFee` never have their fee adjusted. Pre-built transactions added with `addTransaction` always pay their own fixed fee and never contribute to other transactions.
 
 ### Sender and Signer
 

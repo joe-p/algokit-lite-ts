@@ -29,6 +29,8 @@ export type ComposerSender = AddressWithTransactionSigner & {
 
 type TxnInfo = {
   feePercent?: number;
+  /** Transaction has a fixed fee (via staticFee) that is never adjusted. */
+  isStaticFee: boolean;
   sender: ComposerSender;
 };
 
@@ -235,7 +237,7 @@ export class Composer<TReturns extends unknown[] = []> {
     if (algosdk.isTransactionWithSigner(arg)) {
       return {
         arg,
-        txnInfo: { sender: { address: arg.txn.sender, txnSigner: arg.signer } },
+        txnInfo: { sender: { address: arg.txn.sender, txnSigner: arg.signer }, isStaticFee: false },
       };
     }
 
@@ -250,6 +252,7 @@ export class Composer<TReturns extends unknown[] = []> {
         arg: { txn, signer: sdkParams.signer },
         txnInfo: {
           feePercent: paymentParams.feePercent,
+          isStaticFee: paymentParams.staticFee !== undefined,
           sender: paymentParams.sender,
         },
       };
@@ -410,7 +413,8 @@ export class Composer<TReturns extends unknown[] = []> {
 
     if (this.txnInfo.find((t) => t.feePercent !== undefined) === undefined) {
       for (const info of this.txnInfo) {
-        info.feePercent = 1 / this.txnInfo.length;
+        if (info.isStaticFee) continue;
+        info.feePercent = 1 / this.txnInfo.filter((t) => !t.isStaticFee).length;
       }
     } else {
       const total = this.txnInfo.reduce(
@@ -482,7 +486,9 @@ export class Composer<TReturns extends unknown[] = []> {
     const txns = this.atc.buildGroup().map((t) => t.txn);
 
     for (const [i, txn] of txns.entries()) {
-      const percentage = this.txnInfo[i]?.feePercent;
+      const info = this.txnInfo[i];
+      if (info?.isStaticFee) continue;
+      const percentage = info?.feePercent;
       if (percentage === undefined) continue;
       txn.fee += BigInt(Math.ceil(percentage * Number(feeNeeded)));
     }
@@ -656,6 +662,7 @@ export class Composer<TReturns extends unknown[] = []> {
               if (typeof arg === "object" && "txn" in arg) {
                 this.txnInfo.push({
                   sender: { address: arg.txn.sender, txnSigner: arg.signer },
+                  isStaticFee: false,
                 });
               }
             }
@@ -669,8 +676,12 @@ export class Composer<TReturns extends unknown[] = []> {
         }
       } else throw Error("Unsupported transaction params");
 
-      const { feePercent, sender } = paramOverridesOf(p);
-      this.txnInfo.push({ feePercent, sender });
+      const { feePercent, staticFee, sender } = paramOverridesOf(p);
+      this.txnInfo.push({
+        feePercent,
+        isStaticFee: staticFee !== undefined,
+        sender,
+      });
     }
 
     if (algod) {

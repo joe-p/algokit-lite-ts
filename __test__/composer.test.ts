@@ -571,6 +571,32 @@ describe("Composer ARC56", () => {
     ).rejects.toThrow("feePercent across the group must sum to 1");
   });
 
+  it("should not change the fee of a transaction with a staticFee", async () => {
+    const composer = new Composer({
+      getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
+    });
+
+    const txns = await composer
+      .addPayment({
+        sender,
+        receiver: sender.address,
+        amount: 0n,
+        staticFee: 0n,
+      })
+      .addPayment({
+        sender,
+        receiver: sender.address,
+        amount: 0n,
+        note: new Uint8Array(4096),
+        feePercent: 1,
+      })
+      .buildGroup(localnet.algod);
+
+    expect(getTxn(txns, 0).txn.fee).toBe(0n);
+    expect(getTxn(txns, 1).txn.fee).toBeGreaterThan(0n);
+    expect(getTxn(txns, 1).txn.fee).toBeGreaterThan(1_000n);
+  });
+
   it("should let a zero-fee transaction be covered by another transaction's staticFee", async () => {
     const payer = await localnet.generateAccount({ fund: 10_000_000n });
 
