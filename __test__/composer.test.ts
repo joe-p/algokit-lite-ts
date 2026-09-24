@@ -452,7 +452,6 @@ describe("Composer ARC56", () => {
         sender,
         receiver: sender.address,
         amount: 0n,
-        feePercent: 0,
       })
       .addMethodCall({
         arc56,
@@ -618,6 +617,96 @@ describe("Composer ARC56", () => {
       .execute(localnet.algod);
 
     expect(result.confirmedRound).toBeGreaterThan(0n);
+  });
+
+  it("should set a staticUsage fee based on the current min fee", async () => {
+    const receiver = await localnet.generateAccount({});
+
+    const txns = await localnet
+      .composer()
+      .addPayment({
+        sender,
+        receiver: receiver.address,
+        amount: 0n,
+        staticUsage: 2_000_000n,
+      })
+      .buildGroupOffline();
+
+    expect(getTxn(txns, 0).txn.fee).toBe(2_000n);
+  });
+
+  it("should split the group fee across a staticUsage and an equal-split transaction", async () => {
+    const composer = new Composer({
+      getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
+    });
+
+    const txns = await composer
+      .addPayment({
+        sender,
+        receiver: sender.address,
+        amount: 0n,
+        staticUsage: 1_000_000n,
+      })
+      .addPayment({
+        sender,
+        receiver: sender.address,
+        amount: 0n,
+      })
+      .buildGroup(localnet.algod);
+
+    expect(getTxn(txns, 0).txn.fee).toBe(1_000n);
+    expect(getTxn(txns, 1).txn.fee).toBeGreaterThan(0n);
+  });
+
+  it("should let a zero-fee transaction be covered by another transaction's staticUsage", async () => {
+    const payer = await localnet.generateAccount({ fund: 10_000_000n });
+
+    const result = await localnet
+      .composer()
+      .addPayment({
+        sender: payer,
+        receiver: payer.address,
+        amount: 0n,
+        staticFee: 0n,
+      })
+      .addPayment({
+        sender: payer,
+        receiver: payer.address,
+        amount: 0n,
+        // Its own usage plus the usage the transaction above did not cover
+        staticUsage: 2_000_000n,
+      })
+      .execute(localnet.algod);
+
+    expect(result.confirmedRound).toBeGreaterThan(0n);
+  });
+
+  it("should throw error when staticUsage is combined with staticFee", () => {
+    expect(() =>
+      new Composer({
+        getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
+      }).addPayment({
+        sender,
+        receiver: sender.address,
+        amount: 0n,
+        staticFee: 0n,
+        staticUsage: 1_000_000n,
+      }),
+    ).toThrow("staticFee, staticUsage and feePercent are mutually exclusive");
+  });
+
+  it("should throw error when staticUsage is combined with feePercent", () => {
+    expect(() =>
+      new Composer({
+        getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
+      }).addPayment({
+        sender,
+        receiver: sender.address,
+        amount: 0n,
+        feePercent: 1,
+        staticUsage: 1_000_000n,
+      }),
+    ).toThrow("staticFee, staticUsage and feePercent are mutually exclusive");
   });
 
   it("should accept a pre-built transaction", async () => {

@@ -29,8 +29,10 @@ export type ComposerSender = AddressWithTransactionSigner & {
 
 type TxnInfo = {
   feePercent?: number;
-  /** Transaction has a fixed fee (via staticFee) that is never adjusted. */
-  isStaticFee: boolean;
+  /** Transaction covers a fixed amount of group usage (via staticUsage). */
+  staticUsage?: bigint;
+  /** Transaction has a fixed fee (via staticFee or staticUsage) that is never adjusted. */
+  isStatic: boolean;
   sender: ComposerSender;
 };
 
@@ -43,6 +45,12 @@ type ParamOverrides = {
    * for the transaction that covers them.
    */
   staticFee?: bigint;
+  /**
+   * Cover this much group usage regardless of the current fee per usage. The
+   * fee is derived from the current min fee. Mutually exclusive with staticFee
+   * and feePercent.
+   */
+  staticUsage?: bigint;
   feePercent?: number;
 };
 
@@ -163,6 +171,17 @@ function paramOverridesOf(
   return p.assetTransfer;
 }
 
+/** staticFee, staticUsage and feePercent are mutually exclusive */
+function assertMutuallyExclusiveFeeParams(p: ParamOverrides) {
+  const defined =
+    (p.staticFee !== undefined ? 1 : 0) +
+    (p.staticUsage !== undefined ? 1 : 0) +
+    (p.feePercent !== undefined ? 1 : 0);
+  if (defined > 1) {
+    throw Error("staticFee, staticUsage and feePercent are mutually exclusive");
+  }
+}
+
 export interface MethodResult<TReturn = unknown> extends Omit<
   algosdk.ABIResult,
   "returnValue"
@@ -210,7 +229,11 @@ export class Composer<TReturns extends unknown[] = []> {
 
     suggestedParams = {
       ...suggestedParams,
-      fee: params.staticFee ?? 0n,
+      fee:
+        params.staticFee ??
+        (params.staticUsage !== undefined
+          ? feeForUsage(params.staticUsage, BigInt(suggestedParams.minFee))
+          : 0n),
       flatFee: true,
     };
 
@@ -237,12 +260,13 @@ export class Composer<TReturns extends unknown[] = []> {
     if (algosdk.isTransactionWithSigner(arg)) {
       return {
         arg,
-        txnInfo: { sender: { address: arg.txn.sender, txnSigner: arg.signer }, isStaticFee: false },
+        txnInfo: { sender: { address: arg.txn.sender, txnSigner: arg.signer }, isStatic: false },
       };
     }
 
     if (argType === "pay") {
       const paymentParams = arg as PaymentParams;
+      assertMutuallyExclusiveFeeParams(paymentParams);
       const sdkParams = await this.getSdkParams(paymentParams);
       const txn = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
         ...paymentParams,
@@ -252,7 +276,10 @@ export class Composer<TReturns extends unknown[] = []> {
         arg: { txn, signer: sdkParams.signer },
         txnInfo: {
           feePercent: paymentParams.feePercent,
-          isStaticFee: paymentParams.staticFee !== undefined,
+          staticUsage: paymentParams.staticUsage,
+          isStatic:
+            paymentParams.staticFee !== undefined ||
+            paymentParams.staticUsage !== undefined,
           sender: paymentParams.sender,
         },
       };
@@ -264,6 +291,9 @@ export class Composer<TReturns extends unknown[] = []> {
   }
 
   add(params: TransactionParams) {
+    if (!("txn" in params)) {
+      assertMutuallyExclusiveFeeParams(paramOverridesOf(params));
+    }
     this.pendingParams.push(params);
     return this;
   }
@@ -413,8 +443,8 @@ export class Composer<TReturns extends unknown[] = []> {
 
     if (this.txnInfo.find((t) => t.feePercent !== undefined) === undefined) {
       for (const info of this.txnInfo) {
-        if (info.isStaticFee) continue;
-        info.feePercent = 1 / this.txnInfo.filter((t) => !t.isStaticFee).length;
+        if (info.isStatic) continue;
+        info.feePercent = 1 / this.txnInfo.filter((t) => !t.isStatic).length;
       }
     } else {
       const total = this.txnInfo.reduce(
@@ -480,14 +510,36 @@ export class Composer<TReturns extends unknown[] = []> {
     const paid = BigInt(groupFeesPaid ?? 0) - extraFees;
 
     const requiredFees = feeForUsage(usage, minFee);
-    const feeNeeded = requiredFees > paid ? requiredFees - paid : 0n;
-    if (feeNeeded === 0n) return;
 
     const txns = this.atc.buildGroup().map((t) => t.txn);
 
+    // Update staticUsage transactions to their fee at the current min fee. Any
+    // fee they already contributed during simulation was based on the
+    // suggested params, so account for the difference.
+    let paidIncludesStaticUsage = 0n;
+    let staticUsageFees = 0n;
+    for (const [i, info] of this.txnInfo.entries()) {
+      if (info.staticUsage === undefined) continue;
+      const txn = txns[i];
+      if (txn === undefined) continue;
+      paidIncludesStaticUsage += txn.fee;
+      const fee = feeForUsage(info.staticUsage, minFee);
+      staticUsageFees += fee;
+      txn.fee = fee;
+    }
+
+    const feeNeeded =
+      requiredFees - paid + paidIncludesStaticUsage - staticUsageFees;
+    if (feeNeeded <= 0n) {
+      if (paidIncludesStaticUsage > 0n || staticUsageFees > 0n) {
+        Composer.regroup(txns);
+      }
+      return;
+    }
+
     for (const [i, txn] of txns.entries()) {
       const info = this.txnInfo[i];
-      if (info?.isStaticFee) continue;
+      if (info?.isStatic) continue;
       const percentage = info?.feePercent;
       if (percentage === undefined) continue;
       txn.fee += BigInt(Math.ceil(percentage * Number(feeNeeded)));
@@ -662,7 +714,7 @@ export class Composer<TReturns extends unknown[] = []> {
               if (typeof arg === "object" && "txn" in arg) {
                 this.txnInfo.push({
                   sender: { address: arg.txn.sender, txnSigner: arg.signer },
-                  isStaticFee: false,
+                  isStatic: false,
                 });
               }
             }
@@ -676,10 +728,11 @@ export class Composer<TReturns extends unknown[] = []> {
         }
       } else throw Error("Unsupported transaction params");
 
-      const { feePercent, staticFee, sender } = paramOverridesOf(p);
+      const { feePercent, staticFee, staticUsage, sender } = paramOverridesOf(p);
       this.txnInfo.push({
         feePercent,
-        isStaticFee: staticFee !== undefined,
+        staticUsage,
+        isStatic: staticFee !== undefined || staticUsage !== undefined,
         sender,
       });
     }
