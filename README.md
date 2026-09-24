@@ -31,25 +31,39 @@ In AlgoKit utils you can use extraFee to hardcode extra fee to cover other trans
 
 ```ts
 // Send an app call with two inner transactions
-composer.addAppCallMethodCall({
-  sender,
-  appId,
-  args,
-  method,
-  extraFee: microAlgo(2_000),
-});
+composer
+  .addAppCallMethodCall({
+    sender,
+    appId,
+    args,
+    method,
+    staticFee: microAlgo(0),
+  })
+  .addPayment({
+    sender: feePayer,
+    receiver: feePayer,
+    amount: microAlgo(0),
+    extraFee: microAlgo(3_000), // 1_000 for the outer, 2_000 for the inners
+  });
 ```
 
 Alternatively, you can use the `maxFee` parameter in combination with `coverAppCallInnerTransactionFees` when sending. This will use simulate to add the required fee up to the required amount
 
 ```ts
-composer.addAppCallMethodCall({
-  sender,
-  appId,
-  args,
-  method,
-  maxFee: microAlgo(3_000),
-});
+composer
+  .addAppCallMethodCall({
+    sender,
+    appId,
+    args,
+    method,
+    staticFee: microAlgo(0),
+  })
+  .addPayment({
+    sender: feePayer,
+    receiver: feePayer,
+    amount: microAlgo(0),
+    maxFee: microAlgo(4_000), // 1_000 for this txn, 1_000 for the outer, 2_000 for the inners
+  });
 composer.send({ coverAppCallInnerTransactionFees: true });
 ```
 
@@ -60,15 +74,20 @@ The problem with this pattern is that it generally requires some assumptions to 
 Lite does not have a `maxFee` or `extraFee` field. Instead, each transaction has a `feePercent` parameter that defines what proportion of the group's total fee that transaction pays. The Lite composer uses simulate to determine the group's total fee, which is then split across the transactions according to their `feePercent`. This avoids any assumptions needing to be made about fee prices.
 
 ```ts
-import { Composer } from "algokit-lite";
-
-composer.addMethodCall({
-  sender,
-  arc56,
-  appID,
-  method,
-  feePercent: 1, // this transaction pays the entire group fee
-});
+composer
+  .addAppCallMethodCall({
+    sender,
+    appId,
+    args,
+    method,
+    // No feePercent implies 0
+  })
+  .addPayment({
+    sender: feePayer,
+    receiver: feePayer,
+    amount: 0,
+    feePercent: 1, // cover all the fees in the group 
+  });
 ```
 
 > [!NOTE]
