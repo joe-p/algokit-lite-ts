@@ -16,7 +16,7 @@ Options:
   -o, --output <path>       Output file path (default: <name>Client.ts in the
                             same directory as the input, or stdout if omitted)
       --import-path <path>  Module specifier used for the generated import
-                            statement (default: "algokit-lite")
+                            statement (default: "@joe-p/algokit-lite")
   -h, --help                Show this help message
   -v, --version             Print the version
 `;
@@ -112,7 +112,7 @@ async function main(): Promise<void> {
   }
 
   const generator = new ARC56Generator(arc56, {
-    clientImportPath: importPath ?? "algokit-lite",
+    clientImportPath: importPath ?? "@joe-p/algokit-lite",
   });
 
   const code = await generator.generate();

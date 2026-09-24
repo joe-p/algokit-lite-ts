@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "algokit-lite",
+      "name": "@joe-p/algokit-lite",
       "dependencies": {
         "algosdk": "^3.7.0",
         "tweetnacl": "^1.0.3",

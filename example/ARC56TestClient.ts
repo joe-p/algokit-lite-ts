@@ -8,7 +8,7 @@ import {
   type MethodExecutionResult,
   type PaymentParams,
   type ARC56Contract,
-} from "algokit-lite";
+} from "@joe-p/algokit-lite";
 
 type TypedMethodParams<TArgs = undefined> = Omit<
   AppClientMethodParams,

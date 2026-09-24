@@ -11,7 +11,7 @@ import * as path from "path";
 export interface ARC56GeneratorOptions {
   /**
    * The module specifier used in the generated import statement.
-   * Defaults to "algokit-lite".
+   * Defaults to "@joe-p/algokit-lite".
    */
   clientImportPath?: string;
 }
@@ -23,7 +23,7 @@ export class ARC56Generator {
   constructor(arc56: ARC56Contract, options: ARC56GeneratorOptions = {}) {
     this.arc56 = arc56;
     this.options = {
-      clientImportPath: "algokit-lite",
+      clientImportPath: "@joe-p/algokit-lite",
       ...options,
     };
   }
@@ -570,7 +570,7 @@ export class ARC56Generator {
   }
 
   async generate(): Promise<string> {
-    const clientImportPath = this.options.clientImportPath ?? "algokit-lite";
+    const clientImportPath = this.options.clientImportPath ?? "@joe-p/algokit-lite";
     const hasBareCreate = (this.arc56.bareActions?.create ?? []).length > 0;
 
     const bareImports = hasBareCreate

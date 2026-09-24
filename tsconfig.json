@@ -15,7 +15,7 @@
     "verbatimModuleSyntax": true,
     "noEmit": true,
     "paths": {
-      "algokit-lite": ["./src/index.ts"]
+      "@joe-p/algokit-lite": ["./src/index.ts"]
     },
 
     // Best practices
