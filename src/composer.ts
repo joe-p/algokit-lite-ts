@@ -435,7 +435,15 @@ export class Composer<TReturns extends unknown[] = []> {
     algosdk.assignGroupID(txns);
   }
 
-  private async simulateForInfo(algod: Algodv2) {
+  /**
+   * Simulate the group to determine its fees and adjust them accordingly.
+   * Returns the simulate response, with fees left unadjusted, if the group
+   * fails.
+   */
+  private async simulateForInfo(
+    algod: Algodv2,
+    request?: algosdk.modelsv2.SimulateRequest,
+  ): Promise<algosdk.modelsv2.SimulateResponse | undefined> {
     const minFee = (await algod.getTransactionParams().do()).minFee;
     const clonedTxns = this.atc.clone().buildGroup();
     const simAtc = new AtomicTransactionComposer();
@@ -458,8 +466,14 @@ export class Composer<TReturns extends unknown[] = []> {
       }
     }
 
+    // Put the extra simulation fee on a transaction whose fee is adjustable, so
+    // it is not charged to a sender that is only meant to pay a static fee
+    const extraFeeIdx = Math.max(
+      0,
+      this.txnInfo.findIndex((t) => !t.isStatic && (t.feePercent ?? 0) > 0),
+    );
     for (const [idx, simTxn] of clonedTxns.entries()) {
-      if (idx === 0) {
+      if (idx === extraFeeIdx) {
         simTxn.txn.fee += extraFees;
       }
       delete simTxn.txn.group;
@@ -481,6 +495,9 @@ export class Composer<TReturns extends unknown[] = []> {
         new algosdk.modelsv2.SimulateRequest({
           allowEmptySignatures: true,
           fixSigners: true,
+          extraOpcodeBudget: request?.extraOpcodeBudget,
+          allowMoreLogging: request?.allowMoreLogging,
+          allowUnnamedResources: request?.allowUnnamedResources,
           txnGroups: [
             new algosdk.modelsv2.SimulateRequestTransactionGroup({
               txns: await Promise.all(signedSimTxns),
@@ -495,13 +512,12 @@ export class Composer<TReturns extends unknown[] = []> {
       throw Error("simulate did not include a group response");
     }
 
-    let { failureMessage } = groupResponse;
-    if (failureMessage) {
-      if (failureMessage.includes("fees is less")) {
-        failureMessage +=
-          ". You need to increase maxUsage on one or more transactions";
+    if (groupResponse.failureMessage) {
+      if (groupResponse.failureMessage.includes("fees is less")) {
+        groupResponse.failureMessage +=
+          ". Give a transaction whose sender can pay a non-zero feePercent, or increase staticUsage or staticFee on one or more transactions";
       }
-      throw new Error(failureMessage);
+      return simulateResponse;
     }
 
     const { groupUsage, groupFeesPaid } = groupResponse;
@@ -534,7 +550,7 @@ export class Composer<TReturns extends unknown[] = []> {
       if (paidIncludesStaticUsage > 0n || staticUsageFees > 0n) {
         Composer.regroup(txns);
       }
-      return;
+      return undefined;
     }
 
     for (const [i, txn] of txns.entries()) {
@@ -547,11 +563,23 @@ export class Composer<TReturns extends unknown[] = []> {
 
     // Fees changed after the group was built, so the group ID must be recomputed
     Composer.regroup(txns);
+    return undefined;
   }
 
-  private async _buildGroup(algod?: Algodv2) {
+  /**
+   * Build the group, using simulate to set fees when algod is given. If that
+   * simulation fails, its response is returned as failedSimulation and the
+   * fees are left unadjusted.
+   */
+  private async _buildGroup(
+    algod?: Algodv2,
+    request?: algosdk.modelsv2.SimulateRequest,
+  ): Promise<{
+    group: algosdk.TransactionWithSigner[];
+    failedSimulation?: algosdk.modelsv2.SimulateResponse;
+  }> {
     if (this.atc.getStatus() >= AtomicTransactionComposerStatus.BUILT) {
-      return this.atc.buildGroup();
+      return { group: this.atc.buildGroup() };
     }
 
     const { atc } = this;
@@ -737,19 +765,28 @@ export class Composer<TReturns extends unknown[] = []> {
       });
     }
 
-    if (algod) {
-      await this.simulateForInfo(algod);
-    }
+    const failedSimulation = algod
+      ? await this.simulateForInfo(algod, request)
+      : undefined;
 
-    return this.atc.buildGroup();
+    return { group: this.atc.buildGroup(), failedSimulation };
+  }
+
+  /** Throw the failure of a simulation that was run to determine fees */
+  private static throwSimulationFailure(
+    simulateResponse: algosdk.modelsv2.SimulateResponse,
+  ): never {
+    throw new Error(simulateResponse.txnGroups[0]?.failureMessage);
   }
 
   async buildGroup(algod: Algodv2) {
-    return this._buildGroup(algod);
+    const { group, failedSimulation } = await this._buildGroup(algod);
+    if (failedSimulation) Composer.throwSimulationFailure(failedSimulation);
+    return group;
   }
 
-  buildGroupOffline() {
-    return this._buildGroup();
+  async buildGroupOffline() {
+    return (await this._buildGroup()).group;
   }
 
   private decodeResults(methodResults: algosdk.ABIResult[]): MethodResult[] {
@@ -831,7 +868,15 @@ export class Composer<TReturns extends unknown[] = []> {
     methodResults: MethodResults<TReturns>;
     simulateResponse: algosdk.modelsv2.SimulateResponse;
   }> {
-    await this.buildGroup(algod);
+    const { failedSimulation } = await this._buildGroup(algod, request);
+    // The group failed while determining fees. Simulating it again with
+    // unadjusted fees would only fail on fees, so return the original failure.
+    if (failedSimulation) {
+      return {
+        simulateResponse: failedSimulation,
+        methodResults: [] as unknown as MethodResults<TReturns>,
+      };
+    }
     const result = await this.atc.simulate(algod, request);
 
     return {
