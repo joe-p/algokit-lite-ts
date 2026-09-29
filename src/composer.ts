@@ -29,6 +29,8 @@ export type ComposerSender = AddressWithTransactionSigner & {
 
 type TxnInfo = {
   feePercent?: number;
+  /** Most group usage the transaction may pay for once its fee is adjusted. */
+  maxUsage?: bigint;
   /** Transaction covers a fixed amount of group usage (via staticUsage). */
   staticUsage?: bigint;
   /** Transaction has a fixed fee (via staticFee or staticUsage) that is never adjusted. */
@@ -52,6 +54,14 @@ type ParamOverrides = {
    */
   staticUsage?: bigint;
   feePercent?: number;
+  /**
+   * The most group usage this transaction may pay for once its fee is set by
+   * simulate. The cap is derived from the current min fee. If the transaction's
+   * share of the group fee is higher, building the group fails. Only takes
+   * effect when simulating and cannot be combined with staticFee or
+   * staticUsage.
+   */
+  maxUsage?: bigint;
 };
 
 type OverriddenParams = Pick<
@@ -180,6 +190,12 @@ function assertMutuallyExclusiveFeeParams(p: ParamOverrides) {
   if (defined > 1) {
     throw Error("staticFee, staticUsage and feePercent are mutually exclusive");
   }
+  if (
+    p.maxUsage !== undefined &&
+    (p.staticFee !== undefined || p.staticUsage !== undefined)
+  ) {
+    throw Error("maxUsage cannot be combined with staticFee or staticUsage");
+  }
 }
 
 export interface MethodResult<TReturn = unknown> extends Omit<
@@ -260,7 +276,10 @@ export class Composer<TReturns extends unknown[] = []> {
     if (algosdk.isTransactionWithSigner(arg)) {
       return {
         arg,
-        txnInfo: { sender: { address: arg.txn.sender, txnSigner: arg.signer }, isStatic: false },
+        txnInfo: {
+          sender: { address: arg.txn.sender, txnSigner: arg.signer },
+          isStatic: false,
+        },
       };
     }
 
@@ -276,6 +295,7 @@ export class Composer<TReturns extends unknown[] = []> {
         arg: { txn, signer: sdkParams.signer },
         txnInfo: {
           feePercent: paymentParams.feePercent,
+          maxUsage: paymentParams.maxUsage,
           staticUsage: paymentParams.staticUsage,
           isStatic:
             paymentParams.staticFee !== undefined ||
@@ -438,12 +458,12 @@ export class Composer<TReturns extends unknown[] = []> {
   /**
    * Simulate the group to determine its fees and adjust them accordingly.
    * Returns the simulate response, with fees left unadjusted, if the group
-   * fails.
+   * fails. Throws if a transaction's adjusted fee would exceed its maxUsage.
    */
   private async simulateForInfo(
     algod: Algodv2,
     request?: algosdk.modelsv2.SimulateRequest,
-  ): Promise<algosdk.modelsv2.SimulateResponse | undefined> {
+  ): Promise<{ failedSimulation?: algosdk.modelsv2.SimulateResponse }> {
     const minFee = (await algod.getTransactionParams().do()).minFee;
     const clonedTxns = this.atc.clone().buildGroup();
     const simAtc = new AtomicTransactionComposer();
@@ -517,7 +537,7 @@ export class Composer<TReturns extends unknown[] = []> {
         groupResponse.failureMessage +=
           ". Give a transaction whose sender can pay a non-zero feePercent, or increase staticUsage or staticFee on one or more transactions";
       }
-      return simulateResponse;
+      return { failedSimulation: simulateResponse };
     }
 
     const { groupUsage, groupFeesPaid } = groupResponse;
@@ -550,26 +570,44 @@ export class Composer<TReturns extends unknown[] = []> {
       if (paidIncludesStaticUsage > 0n || staticUsageFees > 0n) {
         Composer.regroup(txns);
       }
-      return undefined;
+      return {};
     }
 
-    for (const [i, txn] of txns.entries()) {
+    const newFees = txns.map((txn, i) => {
       const info = this.txnInfo[i];
-      if (info?.isStatic) continue;
+      if (info?.isStatic) return txn.fee;
       const percentage = info?.feePercent;
-      if (percentage === undefined) continue;
-      txn.fee += BigInt(Math.ceil(percentage * Number(feeNeeded)));
+      if (percentage === undefined) return txn.fee;
+      return txn.fee + BigInt(Math.ceil(percentage * Number(feeNeeded)));
+    });
+
+    // Check maxUsage before changing any fees so a throw leaves them untouched
+    const maxUsageErrors: string[] = [];
+    for (const [i, fee] of newFees.entries()) {
+      const maxUsage = this.txnInfo[i]?.maxUsage;
+      if (maxUsage === undefined) continue;
+      const maxFee = feeForUsage(maxUsage, minFee);
+      if (fee <= maxFee) continue;
+      maxUsageErrors.push(
+        `transaction ${i} requires a fee of ${fee} but its maxUsage of ${maxUsage} allows at most ${maxFee}`,
+      );
     }
+    if (maxUsageErrors.length > 0) {
+      throw new Error(`maxUsage exceeded: ${maxUsageErrors.join("; ")}`);
+    }
+
+    for (const [i, txn] of txns.entries()) txn.fee = newFees[i] ?? txn.fee;
 
     // Fees changed after the group was built, so the group ID must be recomputed
     Composer.regroup(txns);
-    return undefined;
+    return {};
   }
 
   /**
    * Build the group, using simulate to set fees when algod is given. If that
    * simulation fails, its response is returned as failedSimulation and the
-   * fees are left unadjusted.
+   * fees are left unadjusted. Throws if a transaction's adjusted fee would
+   * exceed its maxUsage.
    */
   private async _buildGroup(
     algod?: Algodv2,
@@ -756,20 +794,20 @@ export class Composer<TReturns extends unknown[] = []> {
         }
       } else throw Error("Unsupported transaction params");
 
-      const { feePercent, staticFee, staticUsage, sender } = paramOverridesOf(p);
+      const { feePercent, maxUsage, staticFee, staticUsage, sender } =
+        paramOverridesOf(p);
       this.txnInfo.push({
         feePercent,
+        maxUsage,
         staticUsage,
         isStatic: staticFee !== undefined || staticUsage !== undefined,
         sender,
       });
     }
 
-    const failedSimulation = algod
-      ? await this.simulateForInfo(algod, request)
-      : undefined;
+    const simulated = algod ? await this.simulateForInfo(algod, request) : {};
 
-    return { group: this.atc.buildGroup(), failedSimulation };
+    return { group: this.atc.buildGroup(), ...simulated };
   }
 
   /** Throw the failure of a simulation that was run to determine fees */

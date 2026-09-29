@@ -91,7 +91,7 @@ composer
 ```
 
 > [!NOTE]
-> The `feePercent` values across a group must sum to 1. If no transaction in the group specifies `feePercent`, they all default to `1 / n` (an equal split). To make a specific transaction pay nothing, give it `feePercent: 0`. Transactions with a `staticFee` pay exactly that fee, and transactions with a `staticUsage` cover that much usage (their fee follows the current fee-per-usage); neither is ever adjusted. `staticFee`, `staticUsage` and `feePercent` are mutually exclusive. Pre-built transactions added with `addTransaction` always pay their own fixed fee and never contribute to other transactions.
+> The `feePercent` values across a group must sum to 1. If no transaction in the group specifies `feePercent`, they all default to `1 / n` (an equal split). To make a specific transaction pay nothing, give it `feePercent: 0`. Transactions with a `staticFee` pay exactly that fee, and transactions with a `staticUsage` cover that much usage (their fee follows the current fee-per-usage); neither is ever adjusted. `staticFee`, `staticUsage` and `feePercent` are mutually exclusive. Pre-built transactions added with `addTransaction` always pay their own fixed fee and never contribute to other transactions. A transaction can also set `maxUsage` to cap the group usage its adjusted fee may pay for (derived from the current min fee). If its share of the group fee is more than that, `buildGroup`, `execute` and `simulate` throw. `maxUsage` cannot be combined with `staticFee` or `staticUsage`.
 
 ### Sender and Signer
 

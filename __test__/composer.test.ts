@@ -709,6 +709,73 @@ describe("Composer ARC56", () => {
     ).toThrow("staticFee, staticUsage and feePercent are mutually exclusive");
   });
 
+  it("should not change the fee of a transaction within its maxUsage", async () => {
+    const composer = new Composer({
+      getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
+    });
+
+    const txns = await composer
+      .addPayment({
+        sender,
+        receiver: sender.address,
+        amount: 0n,
+        maxUsage: 1_000_000n,
+      })
+      .buildGroup(localnet.algod);
+
+    expect(getTxn(txns, 0).txn.fee).toBe(1_000n);
+  });
+
+  it("should throw when a transaction's fee exceeds its maxUsage", () => {
+    const composer = new Composer({
+      getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
+    });
+
+    expect(
+      composer
+        .addPayment({
+          sender,
+          receiver: sender.address,
+          amount: 0n,
+          note: new Uint8Array(4096),
+          maxUsage: 1_000_000n,
+        })
+        .buildGroup(localnet.algod),
+    ).rejects.toThrow("maxUsage exceeded");
+  });
+
+  it("should throw on simulate when a transaction's fee exceeds its maxUsage", () => {
+    const composer = new Composer({
+      getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
+    });
+
+    expect(
+      composer
+        .addPayment({
+          sender,
+          receiver: sender.address,
+          amount: 0n,
+          note: new Uint8Array(4096),
+          maxUsage: 1_000_000n,
+        })
+        .simulate(localnet.algod),
+    ).rejects.toThrow("maxUsage exceeded");
+  });
+
+  it("should throw error when maxUsage is combined with staticUsage", () => {
+    expect(() =>
+      new Composer({
+        getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
+      }).addPayment({
+        sender,
+        receiver: sender.address,
+        amount: 0n,
+        staticUsage: 1_000_000n,
+        maxUsage: 1_000_000n,
+      }),
+    ).toThrow("maxUsage cannot be combined with staticFee or staticUsage");
+  });
+
   it("should accept a pre-built transaction", async () => {
     const suggestedParams = await localnet.algod.getTransactionParams().do();
 
