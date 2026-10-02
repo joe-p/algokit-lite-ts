@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Logic errors raised during `createMethodCall` and `bareCreate` are mapped to their ARC-56 `sourceInfo` error messages instead of surfacing the raw "assert failed pc=..." text.
+- `getState.map.value()` (and the generated `state.maps.*` getters) base64-decode the ARC-56 map `prefix`, as the spec requires, instead of using the base64 text as the key bytes. ARC-56 files that store the prefix as plain text (such as those from TEALScript before 0.106.3) must be updated to use base64.
 
 ## [0.1.2] - 2026-09-24
 
