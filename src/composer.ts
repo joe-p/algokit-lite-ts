@@ -648,6 +648,10 @@ export class Composer<TReturns extends unknown[] = []> {
       if ("txn" in p) {
         // Already built, so its fee is fixed and cannot cover anything else
         atc.addTransaction(p.txn);
+        this.txnInfo.push({
+          sender: { address: p.txn.txn.sender, txnSigner: p.txn.signer },
+          isStatic: true,
+        });
         continue;
       }
 
@@ -866,16 +870,7 @@ export class Composer<TReturns extends unknown[] = []> {
 
       const arc56 = callParams.arc56;
 
-      const methodDef = arc56.methods.find((m) => {
-        if (typeof callParams.method === "string") {
-          return m.name === callParams.method.split("(")[0];
-        }
-        return m.name === callParams.method.name;
-      });
-
-      if (!methodDef) {
-        return mr;
-      }
+      const { arc56Method: methodDef } = getAbiMethod(arc56, callParams.method);
 
       if (methodDef.returns.type === "void") {
         return {
@@ -888,7 +883,7 @@ export class Composer<TReturns extends unknown[] = []> {
         try {
           const returnValue = decodeMethodReturnValue(
             arc56,
-            methodDef.name,
+            callParams.method,
             mr.rawReturnValue,
           );
           return {

@@ -19,6 +19,7 @@ import {
   getObjectFromStructFieldsAndArray as utilsGetObjectFromStructFieldsAndArray,
   getTypeScriptValue as utilsGetTypeScriptValue,
   decodeMethodReturnValue as utilsDecodeMethodReturnValue,
+  getAbiMethod,
   type StructDef,
 } from "./arc56_utils";
 
@@ -61,7 +62,7 @@ export type AppClientMethodParams = Omit<
   ARC56MethodParams,
   "appID" | "method" | "sender" | "methodArgs" | "arc56"
 > & {
-  method: string;
+  method: algosdk.ABIMethod | string;
   sender?: AddressWithTransactionSigner;
   methodArgs?: unknown[];
 };
@@ -529,23 +530,7 @@ export class ARC56AppClient {
       throw new Error("No sender provided");
     }
 
-    let abiMethod: algosdk.ABIMethod;
-    try {
-      abiMethod = this.contract.getMethodByName(params.method);
-    } catch {
-      throw new Error(
-        `Method ${params.method} not found in ${this.arc56.name} ARC56 definition`,
-      );
-    }
-
-    const arc56Method = this.arc56.methods.find(
-      (m) => m.name === params.method,
-    );
-    if (!arc56Method) {
-      throw new Error(
-        `Method ${params.method} not found in ${this.arc56.name} ARC56 definition`,
-      );
-    }
+    const { abiMethod, arc56Method } = getAbiMethod(this.arc56, params.method);
 
     const rawArgs = params.methodArgs ?? [];
     const encodedArgs = rawArgs.map((a, i) => {
@@ -614,14 +599,7 @@ export class ARC56AppClient {
       onComplete,
     });
 
-    const arc56Method = this.arc56.methods.find(
-      (m) => m.name === params.method,
-    );
-    if (!arc56Method) {
-      throw new Error(
-        `Method ${params.method} not found in ${this.arc56.name} ARC56 definition`,
-      );
-    }
+    const { arc56Method } = getAbiMethod(this.arc56, params.method);
 
     const ocString = ON_COMPLETE_STRINGS[onComplete] ?? "NoOp";
     if (
@@ -629,7 +607,11 @@ export class ARC56AppClient {
         ocString,
       )
     ) {
-      throw Error(`${ocString} is not supported for ${params.method}`);
+      const identifier =
+        typeof params.method === "string"
+          ? params.method
+          : params.method.getSignature();
+      throw Error(`${ocString} is not supported for ${identifier}`);
     }
 
     const result = await this.executeWithErrorParsing(composer);
@@ -983,7 +965,7 @@ export class ARC56AppClient {
   };
 
   decodeMethodReturnValue<T = unknown>(
-    methodName: string,
+    methodName: algosdk.ABIMethod | string,
     rawValue: Uint8Array,
   ): MethodReturnValue<T> {
     return utilsDecodeMethodReturnValue(this.arc56, methodName, rawValue) as T;
