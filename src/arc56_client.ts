@@ -184,7 +184,7 @@ export class ARC56AppClient {
       const pcStr = str.match(/(?:pc=)(\d+)/)?.[1];
       const pc = pcStr !== undefined ? Number(pcStr) : undefined;
 
-      if (appId !== undefined && appId !== this.appId) {
+      if (this.appId !== 0n && appId !== undefined && appId !== this.appId) {
         throw e;
       }
 
@@ -216,7 +216,7 @@ export class ARC56AppClient {
 
       if (errorMessage) {
         throw Error(
-          `Runtime error when executing ${this.arc56.name} (appId: ${this.appId}) in transaction ${txId}: ${errorMessage}`,
+          `Runtime error when executing ${this.arc56.name} (appId: ${appId ?? this.appId}) in transaction ${txId}: ${errorMessage}`,
           { cause: e },
         );
       }
