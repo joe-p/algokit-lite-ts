@@ -945,7 +945,7 @@ export class ARC56AppClient {
           );
         }
 
-        const prefixBytes = new TextEncoder().encode(mapObject.prefix ?? "");
+        const prefixBytes = algosdk.base64ToBytes(mapObject.prefix ?? "");
         const keyBytes = this.getABIEncodedValue(key, mapObject.keyType);
         const encodedKey = new Uint8Array(prefixBytes.length + keyBytes.length);
         encodedKey.set(prefixBytes, 0);
