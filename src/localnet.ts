@@ -52,7 +52,7 @@ export class Localnet {
 
     const indexerToken = opts?.indexer?.token ?? DEFAULT_LOCALNET_TOKEN;
     const indexerServer = opts?.indexer?.host ?? DEFAULT_LOCALNET_HOST;
-    const indexerPort = opts?.indexer?.port ?? "4001";
+    const indexerPort = opts?.indexer?.port ?? "8980";
 
     this.indexer = new algosdk.Indexer(
       indexerToken,
