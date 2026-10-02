@@ -776,6 +776,108 @@ describe("Composer ARC56", () => {
     ).toThrow("maxUsage cannot be combined with staticFee or staticUsage");
   });
 
+  it.each([0, 1, 2])(
+    "should preserve a pre-built transaction's fee at group index %s",
+    async (prebuiltIndex) => {
+      const payer = await localnet.generateAccount({ fund: 1_000_000n });
+      const suggestedParams = await localnet.algod.getTransactionParams().do();
+      const prebuilt = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+        sender: payer.address,
+        receiver: payer.address,
+        amount: 0n,
+        suggestedParams: { ...suggestedParams, fee: 1_000n, flatFee: true },
+      });
+      const composer = localnet.composer();
+      for (let i = 0; i < 3; i++) {
+        if (i === prebuiltIndex) {
+          composer.addTransaction(prebuilt, payer.txnSigner);
+        } else {
+          composer.addPayment({
+            sender,
+            receiver: sender.address,
+            amount: 0n,
+            note: Uint8Array.of(i),
+          });
+        }
+      }
+
+      const txns = await composer.buildGroup(localnet.algod);
+      expect(txns.map((t) => t.txn.fee)).toEqual([1_000n, 1_000n, 1_000n]);
+      expect(prebuilt.fee).toBe(1_000n);
+
+      const before = (
+        await localnet.algod.accountInformation(payer.address).do()
+      ).amount;
+      await composer.execute(localnet.algod);
+      const after = (
+        await localnet.algod.accountInformation(payer.address).do()
+      ).amount;
+      expect(before - after).toBe(1_000n);
+    },
+  );
+
+  it("should apply feePercent to the correct sender after a pre-built transaction", async () => {
+    const payer = await localnet.generateAccount({ fund: 1_000_000n });
+    const covered = await localnet.generateAccount({ fund: 1_000_000n });
+    const suggestedParams = await localnet.algod.getTransactionParams().do();
+    const prebuilt = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+      sender: payer.address,
+      receiver: payer.address,
+      amount: 0n,
+      suggestedParams: { ...suggestedParams, fee: 1_000n, flatFee: true },
+    });
+
+    const txns = await localnet
+      .composer()
+      .addTransaction({ txn: prebuilt, signer: payer.txnSigner })
+      .addPayment({
+        sender: covered,
+        receiver: covered.address,
+        amount: 0n,
+        feePercent: 0,
+      })
+      .addPayment({
+        sender,
+        receiver: sender.address,
+        amount: 0n,
+        feePercent: 1,
+      })
+      .buildGroup(localnet.algod);
+
+    expect(txns.map((t) => t.txn.fee)).toEqual([1_000n, 0n, 2_000n]);
+    expect(prebuilt.fee).toBe(1_000n);
+  });
+
+  it("should sponsor a zero-fee pre-built transaction from a minimum-balance sender", async () => {
+    const covered = await localnet.generateAccount({ fund: 100_000n });
+    const suggestedParams = await localnet.algod.getTransactionParams().do();
+    const prebuilt = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+      sender: covered.address,
+      receiver: covered.address,
+      amount: 0n,
+      suggestedParams: { ...suggestedParams, fee: 0n, flatFee: true },
+    });
+    const composer = localnet
+      .composer()
+      .addTransaction(prebuilt, covered.txnSigner)
+      .addPayment({
+        sender,
+        receiver: sender.address,
+        amount: 0n,
+        feePercent: 1,
+      });
+
+    const txns = await composer.buildGroup(localnet.algod);
+    expect(txns.map((t) => t.txn.fee)).toEqual([0n, 2_000n]);
+    expect(prebuilt.fee).toBe(0n);
+
+    const result = await composer.execute(localnet.algod);
+    expect(result.confirmedRound).toBeGreaterThan(0n);
+    expect(
+      (await localnet.algod.accountInformation(covered.address).do()).amount,
+    ).toBe(100_000n);
+  });
+
   it("should accept a pre-built transaction", async () => {
     const suggestedParams = await localnet.algod.getTransactionParams().do();
 
