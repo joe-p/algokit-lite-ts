@@ -625,6 +625,10 @@ export class Composer<TReturns extends unknown[] = []> {
       if ("txn" in p) {
         // Already built, so its fee is fixed and cannot cover anything else
         atc.addTransaction(p.txn);
+        this.txnInfo.push({
+          sender: { address: p.txn.txn.sender, txnSigner: p.txn.signer },
+          isStatic: true,
+        });
         continue;
       }
 
