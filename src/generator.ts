@@ -7,6 +7,7 @@ import type {
 } from "./types/arc56";
 import * as fs from "fs";
 import * as path from "path";
+import { getAbiMethodFromDefinition } from "./arc56_utils";
 
 export interface ARC56GeneratorOptions {
   /**
@@ -26,6 +27,15 @@ export class ARC56Generator {
       clientImportPath: "@joe-p/algokit-lite",
       ...options,
     };
+  }
+
+  private getMethodKey(method: Method): { name: string; property: string } {
+    const overloaded =
+      this.arc56.methods.filter((m) => m.name === method.name).length > 1;
+    const name = overloaded
+      ? getAbiMethodFromDefinition(this.arc56, method).getSignature()
+      : method.name;
+    return { name, property: overloaded ? JSON.stringify(name) : name };
   }
 
   getTypeScriptType(type: string): string {
@@ -264,12 +274,13 @@ export class ARC56Generator {
     const lines = ["params = {"];
 
     this.arc56.methods.forEach((m) => {
-      const retType = `${this.arc56.name}ReturnTypes["${m.name}"]`;
+      const { name, property } = this.getMethodKey(m);
+      const retType = `${this.arc56.name}ReturnTypes[${JSON.stringify(name)}]`;
 
       if (m.args.length === 0) {
         lines.push(
-          `${m.name}: (methodParams: TypedMethodParams = {}): MethodParams<${retType}> => {`,
-          `  return this.getParams<${retType}>({ method: "${m.name}", ...methodParams, methodArgs: [] });`,
+          `${property}: (methodParams: TypedMethodParams = {}): MethodParams<${retType}> => {`,
+          `  return this.getParams<${retType}>({ method: ${JSON.stringify(name)}, ...methodParams, methodArgs: [] });`,
           "},",
         );
       } else {
@@ -279,8 +290,8 @@ export class ARC56Generator {
           .join(", ");
 
         lines.push(
-          `${m.name}: (methodParams: TypedMethodParams<${argsType}>): MethodParams<${retType}> => {`,
-          `  return this.getParams<${retType}>({ method: "${m.name}", ...methodParams, methodArgs: [${methodArgsStr}] });`,
+          `${property}: (methodParams: TypedMethodParams<${argsType}>): MethodParams<${retType}> => {`,
+          `  return this.getParams<${retType}>({ method: ${JSON.stringify(name)}, ...methodParams, methodArgs: [${methodArgsStr}] });`,
           "},",
         );
       }
@@ -297,7 +308,7 @@ export class ARC56Generator {
       const retType = this.getTypeScriptType(
         m.returns.struct ?? m.returns.type,
       );
-      lines.push(`${m.name}: ${retType};`);
+      lines.push(`${this.getMethodKey(m).property}: ${retType};`);
     });
 
     lines.push("};");
@@ -351,12 +362,13 @@ export class ARC56Generator {
       lines.push(`${property} = {`);
 
       methods.forEach((m) => {
-        const retType = `${this.arc56.name}ReturnTypes["${m.name}"]`;
+        const { name, property } = this.getMethodKey(m);
+        const retType = `${this.arc56.name}ReturnTypes[${JSON.stringify(name)}]`;
 
         if (m.args.length === 0) {
           lines.push(
-            `${m.name}: async (methodParams: TypedMethodParams = {}): Promise<{ result: MethodExecutionResult; returnValue: ${retType} }> => {`,
-            `  return this.${clientMethod}({ method: "${m.name}", ...methodParams, methodArgs: [] });`,
+            `${property}: async (methodParams: TypedMethodParams = {}): Promise<{ result: MethodExecutionResult; returnValue: ${retType} }> => {`,
+            `  return this.${clientMethod}({ method: ${JSON.stringify(name)}, ...methodParams, methodArgs: [] });`,
             "},",
           );
         } else {
@@ -366,8 +378,8 @@ export class ARC56Generator {
             .join(", ");
 
           lines.push(
-            `${m.name}: async (methodParams: TypedMethodParams<${argsType}>): Promise<{ result: MethodExecutionResult; returnValue: ${retType} }> => {`,
-            `  return this.${clientMethod}({ method: "${m.name}", ...methodParams, methodArgs: [${methodArgsStr}] });`,
+            `${property}: async (methodParams: TypedMethodParams<${argsType}>): Promise<{ result: MethodExecutionResult; returnValue: ${retType} }> => {`,
+            `  return this.${clientMethod}({ method: ${JSON.stringify(name)}, ...methodParams, methodArgs: [${methodArgsStr}] });`,
             "},",
           );
         }
@@ -422,7 +434,8 @@ export class ARC56Generator {
     }
 
     createMethods.forEach((m) => {
-      const retType = `${this.arc56.name}ReturnTypes["${m.name}"]`;
+      const { name, property } = this.getMethodKey(m);
+      const retType = `${this.arc56.name}ReturnTypes[${JSON.stringify(name)}]`;
 
       const hasArgs = m.args.length > 0;
       const argsType = hasArgs
@@ -440,10 +453,10 @@ export class ARC56Generator {
         : "";
 
       lines.push(
-        `  ${m.name}: async (params: ${methodParamsType}): Promise<{ appClient: ${this.arc56.name}Client; result: MethodExecutionResult; returnValue: ${retType}; appId: bigint; appAddress: algosdk.Address }> => {`,
+        `  ${property}: async (params: ${methodParamsType}): Promise<{ appClient: ${this.arc56.name}Client; result: MethodExecutionResult; returnValue: ${retType}; appId: bigint; appAddress: algosdk.Address }> => {`,
         `    const { appId, appAddress, result, returnValue } = await ARC56AppClient.createMethodCall({`,
         `      arc56: APP_SPEC,`,
-        `      method: "${m.name}",`,
+        `      method: ${JSON.stringify(name)},`,
         `      ...params,`,
         `      methodArgs: [${methodArgsStr}],`,
         `    });`,
@@ -545,10 +558,11 @@ export class ARC56Generator {
     this.arc56.methods.forEach((m) => {
       if (m.returns.type === "void") return;
 
-      const retType = `${this.arc56.name}ReturnTypes["${m.name}"]`;
+      const { name, property } = this.getMethodKey(m);
+      const retType = `${this.arc56.name}ReturnTypes[${JSON.stringify(name)}]`;
       lines.push(
-        `${m.name}: (rawValue: Uint8Array): ${retType} => {`,
-        `  return this.decodeMethodReturnValue("${m.name}", rawValue);`,
+        `${property}: (rawValue: Uint8Array): ${retType} => {`,
+        `  return this.decodeMethodReturnValue(${JSON.stringify(name)}, rawValue);`,
         "},",
       );
     });

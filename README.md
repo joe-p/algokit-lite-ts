@@ -214,6 +214,12 @@ The state schema comes from the ARC56 contract, and the number of extra program 
 
 AlgoKit Utils includes abstractions for idempotent deployment. This feature uses the note field and indexer to find previous deployments of a contract. AlgoKit Lite does not include a similar feature. If you'd like to track previous deployments, you must implement your own way of recording past deployments (on or off chain).
 
+### Overloaded ABI Methods
+
+Composer and app client methods accept a full ABI signature (such as `"bar(uint64)uint64"`) or an `algosdk.ABIMethod` to select an exact overload. Bare names work only when unique; ambiguous names throw an error listing the available signatures.
+
+Generated clients use full-signature keys for overloaded methods, for example `appClient.call["bar(uint64)uint64"]({ sender, args: { a: 7n } })`. The same keys apply to `params`, action-specific calls, `create`, return types, and non-void `decodeReturnValue` helpers. Unique methods retain their bare-name keys.
+
 ### Typed Composer
 
 #### Utils

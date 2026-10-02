@@ -238,13 +238,10 @@ export function getTypeScriptValue(
 
 export function decodeMethodReturnValue(
   arc56: ARC56Contract,
-  methodName: string,
+  methodName: algosdk.ABIMethod | string,
   rawValue: Uint8Array,
 ): unknown {
-  const method = arc56.methods.find((m) => m.name === methodName);
-  if (!method) {
-    throw new Error(`Method ${methodName} not found in ${arc56.name}`);
-  }
+  const { arc56Method: method } = getAbiMethod(arc56, methodName);
   if (method.returns.type === "void" || rawValue.length === 0) {
     return undefined;
   }
@@ -276,39 +273,42 @@ export function getAbiMethod(
   arc56: ARC56Contract,
   method: algosdk.ABIMethod | string,
 ): { abiMethod: algosdk.ABIMethod; arc56Method: Method } {
-  const methodName = typeof method === "string" ? method : method.name;
+  const identifier = typeof method === "string" ? method : method.getSignature();
+  const isSignature = typeof method !== "string" || identifier.includes("(");
+  const name = isSignature ? identifier.split("(")[0] : identifier;
+  const candidates = arc56.methods
+    .filter((m) => m.name === name)
+    .map((arc56Method) => ({
+      arc56Method,
+      abiMethod: getAbiMethodFromDefinition(arc56, arc56Method),
+    }));
+  const matches = isSignature
+    ? candidates.filter((m) => m.abiMethod.getSignature() === identifier)
+    : candidates;
 
-  const arc56Method = arc56.methods.find((m) => {
-    if (typeof method === "string") {
-      if (method.includes("(")) {
-        return m.name === method.split("(")[0];
-      }
-      return m.name === method;
-    }
-    return m.name === method.name;
-  });
-
-  if (!arc56Method) {
+  const match = matches[0];
+  if (!match) {
     throw new Error(
-      `Method ${methodName} not found in ${arc56.name} ARC56 definition`,
+      `Method ${identifier} not found in ${arc56.name} ARC56 definition`,
+    );
+  }
+  if (matches.length > 1) {
+    throw new Error(
+      `Method ${identifier} is ambiguous in ${arc56.name} ARC56 definition; use one of: ${matches.map((m) => m.abiMethod.getSignature()).join(", ")}`,
     );
   }
 
-  if (typeof method !== "string") {
-    return { abiMethod: method, arc56Method };
-  }
+  return match;
+}
 
+export function getAbiMethodFromDefinition(
+  arc56: ARC56Contract,
+  arc56Method: Method,
+): algosdk.ABIMethod {
   try {
-    const contract = new algosdk.ABIContract({
-      name: arc56.name,
-      methods: arc56.methods,
-      events: arc56.events,
-      desc: arc56.desc,
-      networks: arc56.networks,
-    });
-    return { abiMethod: contract.getMethodByName(methodName), arc56Method };
+    return new algosdk.ABIMethod(arc56Method);
   } catch {
-    const abiMethod = new algosdk.ABIMethod({
+    return new algosdk.ABIMethod({
       name: arc56Method.name,
       desc: arc56Method.desc,
       args: arc56Method.args.map((a) => ({
@@ -327,6 +327,5 @@ export function getAbiMethod(
         desc: arc56Method.returns.desc,
       },
     });
-    return { abiMethod, arc56Method };
   }
 }

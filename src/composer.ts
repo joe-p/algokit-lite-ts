@@ -840,16 +840,7 @@ export class Composer<TReturns extends unknown[] = []> {
 
       const arc56 = callParams.arc56;
 
-      const methodDef = arc56.methods.find((m) => {
-        if (typeof callParams.method === "string") {
-          return m.name === callParams.method.split("(")[0];
-        }
-        return m.name === callParams.method.name;
-      });
-
-      if (!methodDef) {
-        return mr;
-      }
+      const { arc56Method: methodDef } = getAbiMethod(arc56, callParams.method);
 
       if (methodDef.returns.type === "void") {
         return {
@@ -862,7 +853,7 @@ export class Composer<TReturns extends unknown[] = []> {
         try {
           const returnValue = decodeMethodReturnValue(
             arc56,
-            methodDef.name,
+            callParams.method,
             mr.rawReturnValue,
           );
           return {
