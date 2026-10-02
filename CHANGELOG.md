@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Composer retries after failed fee simulations or build errors recompute fees and include each transaction only once, rather than reusing unadjusted fees or duplicating transactions.
 - `AVMUint64` state values decode as `bigint` across the full uint64 range, matching generated client types.
 - `Localnet` uses the AlgoKit LocalNet indexer port `8980` by default instead of the algod port `4001`.
 - Logic errors raised during `createMethodCall` and `bareCreate` are mapped to their ARC-56 `sourceInfo` error messages instead of surfacing the raw "assert failed pc=..." text.

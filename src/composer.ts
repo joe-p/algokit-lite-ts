@@ -547,7 +547,8 @@ export class Composer<TReturns extends unknown[] = []> {
 
     const requiredFees = feeForUsage(usage, minFee);
 
-    const txns = this.atc.buildGroup().map((t) => t.txn);
+    const adjustedAtc = this.atc.clone();
+    const txns = adjustedAtc.buildGroup().map((t) => t.txn);
 
     // Update staticUsage transactions to their fee at the current min fee. Any
     // fee they already contributed during simulation was based on the
@@ -570,6 +571,7 @@ export class Composer<TReturns extends unknown[] = []> {
       if (paidIncludesStaticUsage > 0n || staticUsageFees > 0n) {
         Composer.regroup(txns);
       }
+      this.atc = adjustedAtc;
       return {};
     }
 
@@ -600,14 +602,15 @@ export class Composer<TReturns extends unknown[] = []> {
 
     // Fees changed after the group was built, so the group ID must be recomputed
     Composer.regroup(txns);
+    this.atc = adjustedAtc;
     return {};
   }
 
   /**
    * Build the group, using simulate to set fees when algod is given. If that
    * simulation fails, its response is returned as failedSimulation and the
-   * fees are left unadjusted. Throws if a transaction's adjusted fee would
-   * exceed its maxUsage.
+   * unsuccessful build state is discarded so the next call can retry.
+   * Throws if a transaction's adjusted fee would exceed its maxUsage.
    */
   private async _buildGroup(
     algod?: Algodv2,
@@ -620,6 +623,26 @@ export class Composer<TReturns extends unknown[] = []> {
       return { group: this.atc.buildGroup() };
     }
 
+    let built = false;
+    try {
+      const result = await this.buildGroupAttempt(algod, request);
+      built = result.failedSimulation === undefined;
+      return result;
+    } finally {
+      if (!built) {
+        this.atc = new AtomicTransactionComposer();
+        this.txnInfo = [];
+      }
+    }
+  }
+
+  private async buildGroupAttempt(
+    algod?: Algodv2,
+    request?: algosdk.modelsv2.SimulateRequest,
+  ): Promise<{
+    group: algosdk.TransactionWithSigner[];
+    failedSimulation?: algosdk.modelsv2.SimulateResponse;
+  }> {
     const { atc } = this;
     for (const p of this.pendingParams) {
       if ("txn" in p) {
@@ -806,6 +829,9 @@ export class Composer<TReturns extends unknown[] = []> {
     }
 
     const simulated = algod ? await this.simulateForInfo(algod, request) : {};
+    if (simulated.failedSimulation) {
+      return { group: [], ...simulated };
+    }
 
     return { group: this.atc.buildGroup(), ...simulated };
   }
