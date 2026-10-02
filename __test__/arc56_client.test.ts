@@ -156,6 +156,100 @@ describe("ARC56AppClient", () => {
     ).rejects.toThrow("subtract.a must be greater than subtract.b");
   });
 
+  it("should map logic errors during create calls using sourceInfo", async () => {
+    const approvalTeal = `#pragma version 10
+txna ApplicationArgs 1
+btoi
+pushint 42
+==
+assert
+pushint 1
+return`;
+    const bareApprovalTeal = `#pragma version 10
+err`;
+    const clearTeal = `#pragma version 10
+pushint 1
+return`;
+
+    const compile = async (teal: string) =>
+      algosdk.base64ToBytes(
+        (await localnet.algod.compile(teal).do()).result,
+      );
+
+    const createArc56 = {
+      arcs: [],
+      name: "Assert42",
+      structs: {},
+      networks: {},
+      state: {
+        schema: { global: { ints: 0, bytes: 0 }, local: { ints: 0, bytes: 0 } },
+        keys: { global: {}, local: {}, box: {} },
+        maps: { global: {}, local: {}, box: {} },
+      },
+      bareActions: { create: ["NoOp"], call: [] },
+      methods: [
+        {
+          name: "create",
+          args: [{ type: "uint64", name: "x" }],
+          returns: { type: "void" },
+          actions: { create: ["NoOp"], call: [] },
+        },
+      ],
+      sourceInfo: {
+        approval: {
+          sourceInfo: [{ pc: [8], errorMessage: "x must be 42" }],
+          pcOffsetMethod: "none",
+        },
+        clear: { sourceInfo: [], pcOffsetMethod: "none" },
+      },
+      byteCode: {
+        approval: algosdk.bytesToBase64(await compile(approvalTeal)),
+        clear: algosdk.bytesToBase64(await compile(clearTeal)),
+      },
+    } as unknown as ARC56Contract;
+
+    let createError = "";
+    try {
+      await ARC56AppClient.createMethodCall({
+        arc56: createArc56,
+        algod: localnet.algod,
+        sender,
+        method: "create",
+        methodArgs: [1n],
+      });
+    } catch (e) {
+      createError = (e as Error).message;
+    }
+    expect(createError).toContain("x must be 42");
+
+    const bareCreateArc56 = {
+      ...createArc56,
+      sourceInfo: {
+        approval: {
+          sourceInfo: [{ pc: [1], errorMessage: "bare create failed" }],
+          pcOffsetMethod: "none",
+        },
+        clear: { sourceInfo: [], pcOffsetMethod: "none" },
+      },
+      byteCode: {
+        approval: algosdk.bytesToBase64(await compile(bareApprovalTeal)),
+        clear: algosdk.bytesToBase64(await compile(clearTeal)),
+      },
+    } as unknown as ARC56Contract;
+
+    let bareCreateError = "";
+    try {
+      await ARC56AppClient.bareCreate({
+        arc56: bareCreateArc56,
+        algod: localnet.algod,
+        sender,
+      });
+    } catch (e) {
+      bareCreateError = (e as Error).message;
+    }
+    expect(bareCreateError).toContain("bare create failed");
+  });
+
   it("should read global state keys and maps", async () => {
     const { appClient } = await ARC56AppClient.createMethodCall({
       arc56,
