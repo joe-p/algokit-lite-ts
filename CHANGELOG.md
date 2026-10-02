@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Composer retries after failed fee simulations or build errors recompute fees and include each transaction only once, rather than reusing unadjusted fees or duplicating transactions.
 - Pre-built transactions added with `addTransaction()` retain their fixed fees without shifting fee metadata onto the wrong sender in mixed groups.
 - ABI method calls and return decoding resolve full signatures (including `ABIMethod` instances) exactly and reject ambiguous bare names with a list of signatures. Generated clients use full-signature keys for overloaded methods, retaining bare-name keys for unique methods.
 - `AVMUint64` state values decode as `bigint` across the full uint64 range, matching generated client types.
