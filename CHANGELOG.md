@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `Localnet` uses the AlgoKit LocalNet indexer port `8980` by default instead of the algod port `4001`.
 - Logic errors raised during `createMethodCall` and `bareCreate` are mapped to their ARC-56 `sourceInfo` error messages instead of surfacing the raw "assert failed pc=..." text.
 
 ## [0.1.2] - 2026-09-24
