@@ -219,7 +219,7 @@ export function getTypeScriptValue(
     return value;
   }
   if (type === "AVMUint64") {
-    return algosdk.decodeUint64(value);
+    return algosdk.decodeUint64(value, "bigint");
   }
 
   const abiType = getABIType(arc56, type);
