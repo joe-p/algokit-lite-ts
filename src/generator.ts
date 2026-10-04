@@ -584,7 +584,8 @@ export class ARC56Generator {
   }
 
   async generate(): Promise<string> {
-    const clientImportPath = this.options.clientImportPath ?? "@joe-p/algokit-lite";
+    const clientImportPath =
+      this.options.clientImportPath ?? "@joe-p/algokit-lite";
     const hasBareCreate = (this.arc56.bareActions?.create ?? []).length > 0;
 
     const bareImports = hasBareCreate

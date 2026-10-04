@@ -1,0 +1,148 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Sync to latest main
+        run: |
+          git fetch origin main
+          git reset --hard origin/main
+
+      - name: Record base commit
+        id: base
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      # npm is still used to publish: it supports OIDC trusted publishing,
+      # which bun publish does not (oven-sh/bun#22423).
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Update npm
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Merge pending fragments
+        run: bun run semfrag generate
+
+      - name: Check for an unreleased section
+        id: unreleased
+        run: |
+          if grep -qE '^# .*UNRELEASED' CHANGELOG.md; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Finalize release
+        id: release
+        if: steps.unreleased.outputs.found == 'true'
+        run: |
+          bun run semfrag release
+          version="$(bun run semfrag latest)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "notes<<SEMFRAG_NOTES_EOF" >> "$GITHUB_OUTPUT"
+          bun run semfrag notes >> "$GITHUB_OUTPUT"
+          echo "SEMFRAG_NOTES_EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Bump package.json version
+        if: steps.release.outputs.version != ''
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: bun pm pkg set "version=${VERSION}"
+
+      - name: Commit and tag
+        if: steps.release.outputs.version != ''
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changelog changes to commit."
+          else
+            git commit -m "chore: release v${VERSION} [skip ci]"
+          fi
+          git push origin HEAD:main
+          if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
+            echo "Tag v${VERSION} already exists."
+          else
+            git tag "v${VERSION}"
+            git push origin "v${VERSION}"
+          fi
+
+      - name: Create GitHub release
+        if: steps.release.outputs.version != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.release.outputs.version }}
+          NOTES: ${{ steps.release.outputs.notes }}
+        run: |
+          if gh release view "v${VERSION}" >/dev/null 2>&1; then
+            echo "Release v${VERSION} already exists."
+          else
+            gh release create "v${VERSION}" \
+              --title "v${VERSION}" \
+              --notes "$NOTES"
+          fi
+
+      - name: Publish to npm
+        if: steps.release.outputs.version != ''
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          if npm view "@joe-p/algokit-lite@${VERSION}" version >/dev/null 2>&1; then
+            echo "@joe-p/algokit-lite@${VERSION} is already published."
+          else
+            npm publish --access public
+          fi
+
+      - name: Roll back failed release
+        if: failure() || cancelled()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.release.outputs.version }}
+          BASE_SHA: ${{ steps.base.outputs.sha }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if [ -n "$VERSION" ]; then
+            echo "Deleting GitHub release and tag v${VERSION}..."
+            gh release delete "v${VERSION}" --yes --cleanup-tag 2>/dev/null || true
+            git push origin ":refs/tags/v${VERSION}" 2>/dev/null || true
+          fi
+
+          if [ -n "$BASE_SHA" ] && [ "$(git rev-parse HEAD)" != "$BASE_SHA" ]; then
+            echo "Restoring main to ${BASE_SHA}..."
+            git push origin "+${BASE_SHA}:refs/heads/main"
+          fi

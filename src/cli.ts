@@ -118,8 +118,7 @@ async function main(): Promise<void> {
   const code = await generator.generate();
 
   const resolvedOutput =
-    outputPath ??
-    path.join(path.dirname(fullPath), `${arc56.name}Client.ts`);
+    outputPath ?? path.join(path.dirname(fullPath), `${arc56.name}Client.ts`);
 
   if (outputPath === "-") {
     process.stdout.write(code + "\n");

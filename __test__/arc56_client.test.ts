@@ -172,9 +172,7 @@ pushint 1
 return`;
 
     const compile = async (teal: string) =>
-      algosdk.base64ToBytes(
-        (await localnet.algod.compile(teal).do()).result,
-      );
+      algosdk.base64ToBytes((await localnet.algod.compile(teal).do()).result);
 
     const createArc56 = {
       arcs: [],

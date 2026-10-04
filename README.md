@@ -86,7 +86,7 @@ composer
     sender: feePayer,
     receiver: feePayer,
     amount: 0,
-    feePercent: 1, // cover all the fees in the group 
+    feePercent: 1, // cover all the fees in the group
   });
 ```
 
