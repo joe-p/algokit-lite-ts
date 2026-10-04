@@ -46,7 +46,7 @@ jobs:
 
       - name: Prepare release
         id: semfrag
-        uses: joe-p/semfrag/actions/prepare@8c3289a6cfe62de679532461fe8db80216fb5e28 # v0.8.0
+        uses: joe-p/semfrag/actions/prepare@e4ce6e37a786a2d283ce7edbaf235af5aa8d48b7 # v0.9.0
 
       - name: Bump package.json version
         if: steps.semfrag.outputs.released == 'true'
@@ -56,7 +56,7 @@ jobs:
 
       - name: Commit, tag and create GitHub release
         if: steps.semfrag.outputs.released == 'true'
-        uses: joe-p/semfrag/actions/publish@8c3289a6cfe62de679532461fe8db80216fb5e28 # v0.8.0
+        uses: joe-p/semfrag/actions/publish@e4ce6e37a786a2d283ce7edbaf235af5aa8d48b7 # v0.9.0
 
       - name: Publish to npm
         if: steps.semfrag.outputs.released == 'true'
@@ -71,4 +71,4 @@ jobs:
 
       - name: Roll back failed release
         if: failure() || cancelled()
-        uses: joe-p/semfrag/actions/rollback@8c3289a6cfe62de679532461fe8db80216fb5e28 # v0.8.0
+        uses: joe-p/semfrag/actions/rollback@e4ce6e37a786a2d283ce7edbaf235af5aa8d48b7 # v0.9.0
