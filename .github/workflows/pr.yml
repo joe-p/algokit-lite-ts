@@ -24,19 +24,11 @@ jobs:
         with:
           bun-version: 1.4.2
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install AlgoKit
-        run: pipx install algokit==2.10.2
-
-      - name: Start LocalNet
-        run: algokit localnet start
-
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      - name: Start LocalNet
+        run: bun run localnet start
 
       - name: Lint
         run: bun run lint
