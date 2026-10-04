@@ -1,3 +1,9 @@
+# 0.2.1 - October 4th, 2026
+
+## Fixes
+
+- Composer retries after failed fee simulations or build errors recompute fees and include each transaction only once, rather than reusing unadjusted fees or duplicating transactions.
+
 # 0.2.0 - October 4th, 2026
 
 ## Features
