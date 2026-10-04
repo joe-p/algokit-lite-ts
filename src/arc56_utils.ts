@@ -273,7 +273,8 @@ export function getAbiMethod(
   arc56: ARC56Contract,
   method: algosdk.ABIMethod | string,
 ): { abiMethod: algosdk.ABIMethod; arc56Method: Method } {
-  const identifier = typeof method === "string" ? method : method.getSignature();
+  const identifier =
+    typeof method === "string" ? method : method.getSignature();
   const isSignature = typeof method !== "string" || identifier.includes("(");
   const name = isSignature ? identifier.split("(")[0] : identifier;
   const candidates = arc56.methods

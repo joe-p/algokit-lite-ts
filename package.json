@@ -19,9 +19,11 @@
     "algokit-lite": "./src/cli.ts"
   },
   "scripts": {
-    "check:lint": "eslint",
-    "check:types": "tsc --noEmit",
-    "check": "bun check:lint && bun check:types",
+    "lint": "eslint .",
+    "format": "prettier --check .",
+    "check-types": "tsc --noEmit",
+    "check": "bun run lint && bun run format && bun run check-types",
+    "test": "bun test",
     "cli": "bun src/cli.ts"
   },
   "devDependencies": {
@@ -29,6 +31,7 @@
     "@types/bun": "^1.4.1",
     "eslint": "^10.10.0",
     "prettier": "^3.9.6",
+    "semfrag": "^0.7.0",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "typescript-eslint": "^8.69.0"
   },

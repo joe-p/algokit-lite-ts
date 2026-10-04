@@ -1,0 +1,66 @@
+name: PR
+
+on:
+  pull_request:
+
+concurrency:
+  group: pr-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install AlgoKit
+        run: pipx install algokit==2.10.2
+
+      - name: Start LocalNet
+        run: algokit localnet start
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Check formatting
+        run: bun run format
+
+      - name: Check types
+        run: bun run check-types
+
+      - name: Test
+        run: bun run test
+
+      - name: Check changelog
+        run: bun run semfrag generate --dry-run
+
+      - name: Require a changelog fragment for src changes
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          changed="$(git diff --name-only "origin/${BASE_REF}...HEAD")"
+          if printf '%s\n' "$changed" | grep -qE '^src/'; then
+            if ! printf '%s\n' "$changed" | grep -qE '^changelog\.d/'; then
+              echo "::error::Changes under src/ require a changelog fragment in changelog.d/"
+              exit 1
+            fi
+          fi
