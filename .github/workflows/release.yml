@@ -80,10 +80,12 @@ jobs:
         run: bun pm pkg set "version=${VERSION}"
 
       - name: Commit and tag
+        id: artifacts
         if: steps.release.outputs.version != ''
         env:
           VERSION: ${{ steps.release.outputs.version }}
         run: |
+          echo "tag_created=false" >> "$GITHUB_OUTPUT"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
@@ -98,21 +100,25 @@ jobs:
           else
             git tag "v${VERSION}"
             git push origin "v${VERSION}"
+            echo "tag_created=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Create GitHub release
+        id: github_release
         if: steps.release.outputs.version != ''
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.release.outputs.version }}
           NOTES: ${{ steps.release.outputs.notes }}
         run: |
+          echo "release_created=false" >> "$GITHUB_OUTPUT"
           if gh release view "v${VERSION}" >/dev/null 2>&1; then
             echo "Release v${VERSION} already exists."
           else
             gh release create "v${VERSION}" \
               --title "v${VERSION}" \
               --notes "$NOTES"
+            echo "release_created=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Publish to npm
@@ -132,13 +138,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.release.outputs.version }}
           BASE_SHA: ${{ steps.base.outputs.sha }}
+          TAG_CREATED: ${{ steps.artifacts.outputs.tag_created }}
+          RELEASE_CREATED: ${{ steps.github_release.outputs.release_created }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          if [ -n "$VERSION" ]; then
-            echo "Deleting GitHub release and tag v${VERSION}..."
-            gh release delete "v${VERSION}" --yes --cleanup-tag 2>/dev/null || true
+          if [ "$RELEASE_CREATED" = "true" ]; then
+            echo "Deleting GitHub release v${VERSION}..."
+            gh release delete "v${VERSION}" --yes 2>/dev/null || true
+          fi
+
+          if [ "$TAG_CREATED" = "true" ]; then
+            echo "Deleting tag v${VERSION}..."
             git push origin ":refs/tags/v${VERSION}" 2>/dev/null || true
           fi
 
