@@ -319,11 +319,7 @@ async function usage() {
   it("works with a sender that has no signer", async () => {
     const appClient = await create();
 
-    for (const sender of [
-      dispenser.address,
-      dispenser.address.toString(),
-      { address: dispenser.address },
-    ]) {
+    for (const sender of [dispenser.address, { address: dispenser.address }]) {
       const { returnValue } = await appClient.simulateMethodCall({
         method: "getPoint",
         sender,
@@ -331,10 +327,6 @@ async function usage() {
       });
       expect(returnValue).toEqual({ x: 5n, y: 10n });
     }
-
-    expect(
-      appClient.simulateMethodCall({ method: "getPoint", methodArgs: [5n] }),
-    ).rejects.toThrow("No sender provided");
   });
 
   it("throws the ARC56 error message when a readonly method fails an assert", async () => {

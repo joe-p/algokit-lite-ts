@@ -108,8 +108,7 @@ export type MethodExecutionResult = {
 };
 
 export type SimulateMethodParams = Omit<AppClientMethodParams, "sender"> & {
-  /** Nothing is signed when simulating, so the sender needs no signer */
-  sender?: string | algosdk.Address | algosdk.Addressable;
+  sender: algosdk.Address | algosdk.Addressable;
 };
 
 export type MethodSimulationResult = {
@@ -129,11 +128,7 @@ const noSigner: algosdk.TransactionSigner = () => {
 
 function toSimulateSender(
   sender: SimulateMethodParams["sender"],
-): ComposerSender | undefined {
-  if (sender === undefined) return undefined;
-  if (typeof sender === "string") {
-    return { address: algosdk.Address.fromString(sender), txnSigner: noSigner };
-  }
+): ComposerSender {
   if (sender instanceof algosdk.Address) {
     return { address: sender, txnSigner: noSigner };
   }
