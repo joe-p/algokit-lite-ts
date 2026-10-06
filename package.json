@@ -5,28 +5,29 @@
     "type": "git",
     "url": "https://github.com/joe-p/algokit-lite-ts"
   },
-  "module": "src/index.ts",
-  "main": "src/index.ts",
-  "types": "src/index.ts",
+  "module": "dist/index.js",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "type": "module",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "default": "./src/index.ts"
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
     }
   },
   "files": [
-    "src",
-    "bin",
+    "dist",
     "README.md"
   ],
   "bin": {
-    "algokit-lite": "./bin/algokit-lite.js"
+    "algokit-lite": "./dist/cli.js"
   },
   "scripts": {
     "lint": "eslint .",
     "format": "prettier --check .",
-    "check-types": "tsc6 --noEmit",
+    "check-types": "tsc6 --noEmit && tsc6 -p tsconfig.build.json --noEmit",
+    "build": "node -e \"fs.rmSync('dist',{recursive:true,force:true})\" && tsc6 -p tsconfig.build.json",
+    "prepack": "npm run build",
     "check": "pnpm run lint && pnpm run format && pnpm run check-types",
     "test": "vitest run",
     "cli": "tsx src/cli.ts",
@@ -37,8 +38,8 @@
     "@joe-p/algokit-cli": "^0.1.0",
     "@types/node": "^24.19.1",
     "eslint": "^10.10.0",
-    "prettier": "^3.9.6",
     "semfrag": "^0.9.0",
+    "tsx": "^4.23.15",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "typescript-eslint": "^8.69.0",
     "vitest": "^5.0.3"
@@ -48,7 +49,7 @@
   },
   "dependencies": {
     "algosdk": "^3.7.0",
-    "tsx": "^4.23.15",
+    "prettier": "^3.9.6",
     "tweetnacl": "^1.0.3"
   },
   "packageManager": "pnpm@11.0.6"

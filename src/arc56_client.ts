@@ -10,24 +10,20 @@ import {
   type ARC56MethodParams,
   type MethodParams,
   type MethodResult,
-} from "./composer";
+} from "./composer.ts";
 import {
   type ARC56Contract,
   type Method,
   type StorageMap,
-} from "./types/arc56";
+} from "./types/arc56.ts";
 import {
   getABIType as utilsGetABIType,
-  getABITypeFromStructFields as utilsGetABITypeFromStructFields,
   getABIValue as utilsGetABIValue,
-  getABIValuesFromStructFieldsAndObject as utilsGetABIValuesFromStructFieldsAndObject,
-  getObjectFromStructFieldsAndArray as utilsGetObjectFromStructFieldsAndArray,
   getTypeScriptValue as utilsGetTypeScriptValue,
   decodeMethodReturnValue as utilsDecodeMethodReturnValue,
   getAbiMethod,
   parseLogicError,
-  type StructDef,
-} from "./arc56_utils";
+} from "./arc56_utils.ts";
 
 /** Bytes of program that fit in a single application program page */
 const APP_PAGE_SIZE = 2048;
@@ -197,10 +193,6 @@ export class ARC56AppClient {
     }
   }
 
-  private getABITypeFromStructFields(structFields: StructDef): string {
-    return utilsGetABITypeFromStructFields(this.arc56, structFields);
-  }
-
   private getABIType(type: string): string {
     return utilsGetABIType(this.arc56, type);
   }
@@ -244,17 +236,6 @@ export class ARC56AppClient {
     return algosdk.ABIType.from(abiType).encode(this.getABIValue(type, value));
   }
 
-  private getObjectFromStructFieldsAndArray(
-    structFields: StructDef,
-    valuesArray: unknown[],
-  ): Record<string, unknown> {
-    return utilsGetObjectFromStructFieldsAndArray(
-      this.arc56,
-      structFields,
-      valuesArray,
-    );
-  }
-
   /** Get the typescript value, which may be the ABIValue or the struct */
   private getTypeScriptValue(type: string, value: Uint8Array): unknown {
     return utilsGetTypeScriptValue(this.arc56, type, value);
@@ -282,11 +263,11 @@ export class ARC56AppClient {
       .do();
 
     const localState = result.appLocalState?.keyValue ?? [];
-    const targetKeyBytes = new Uint8Array(Buffer.from(b64Key, "base64"));
+    const targetKeyBytes = algosdk.base64ToBytes(b64Key);
 
     const keyValue = localState.find((s) => {
       const keyBytes =
-        s.key instanceof Uint8Array ? s.key : Buffer.from(s.key, "base64");
+        s.key instanceof Uint8Array ? s.key : algosdk.base64ToBytes(s.key);
       if (keyBytes.length !== targetKeyBytes.length) return false;
       return keyBytes.every((b, i) => b === targetKeyBytes[i]);
     });
@@ -299,7 +280,7 @@ export class ARC56AppClient {
       const bytes =
         keyValue.value.bytes instanceof Uint8Array
           ? keyValue.value.bytes
-          : new Uint8Array(Buffer.from(keyValue.value.bytes, "base64"));
+          : algosdk.base64ToBytes(keyValue.value.bytes);
       return this.getTypeScriptValue(type, bytes);
     } else {
       const uintVal =
@@ -311,7 +292,7 @@ export class ARC56AppClient {
   }
 
   private async getBoxValue(b64Key: string, type: string): Promise<unknown> {
-    const boxName = new Uint8Array(Buffer.from(b64Key, "base64"));
+    const boxName = algosdk.base64ToBytes(b64Key);
     const result = await this.algod
       .getApplicationBoxByName(this.appId, boxName)
       .do();
@@ -319,7 +300,7 @@ export class ARC56AppClient {
     const bytes =
       result.value instanceof Uint8Array
         ? result.value
-        : new Uint8Array(Buffer.from(result.value, "base64"));
+        : algosdk.base64ToBytes(result.value);
     return this.getTypeScriptValue(type, bytes);
   }
 
@@ -330,11 +311,11 @@ export class ARC56AppClient {
     const result = await this.algod.getApplicationByID(this.appId).do();
 
     const globalState = result.params?.globalState ?? [];
-    const targetKeyBytes = new Uint8Array(Buffer.from(b64Key, "base64"));
+    const targetKeyBytes = algosdk.base64ToBytes(b64Key);
 
     const keyValue = globalState.find((s) => {
       const keyBytes =
-        s.key instanceof Uint8Array ? s.key : Buffer.from(s.key, "base64");
+        s.key instanceof Uint8Array ? s.key : algosdk.base64ToBytes(s.key);
       if (keyBytes.length !== targetKeyBytes.length) return false;
       return keyBytes.every((b, i) => b === targetKeyBytes[i]);
     });
@@ -347,7 +328,7 @@ export class ARC56AppClient {
       const bytes =
         keyValue.value.bytes instanceof Uint8Array
           ? keyValue.value.bytes
-          : new Uint8Array(Buffer.from(keyValue.value.bytes, "base64"));
+          : algosdk.base64ToBytes(keyValue.value.bytes);
       return this.getTypeScriptValue(type, bytes);
     } else {
       const uintVal =
@@ -356,17 +337,6 @@ export class ARC56AppClient {
           : BigInt(keyValue.value.uint);
       return this.getTypeScriptValue(type, algosdk.encodeUint64(uintVal));
     }
-  }
-
-  private getABIValuesFromStructFieldsAndObject(
-    structFields: StructDef,
-    obj: unknown,
-  ): algosdk.ABIValue[] {
-    return utilsGetABIValuesFromStructFieldsAndObject(
-      this.arc56,
-      structFields,
-      obj,
-    );
   }
 
   private getABIValue(type: string, value: unknown): algosdk.ABIValue {
@@ -387,24 +357,20 @@ export class ARC56AppClient {
       expectedVarsCount === 0 &&
       providedVarsCount === 0
     ) {
-      return new Uint8Array(
-        Buffer.from(this.arc56.byteCode[program], "base64"),
-      );
+      return algosdk.base64ToBytes(this.arc56.byteCode[program]);
     }
 
     if (!this.arc56.source?.[program]) {
       if (this.arc56.byteCode?.[program]) {
-        return new Uint8Array(
-          Buffer.from(this.arc56.byteCode[program], "base64"),
-        );
+        return algosdk.base64ToBytes(this.arc56.byteCode[program]);
       }
       throw new Error(
         `No source or bytecode found for ${program} program in ${this.arc56.name}`,
       );
     }
 
-    let tealString = Buffer.from(this.arc56.source[program], "base64").toString(
-      "utf-8",
+    let tealString = algosdk.bytesToString(
+      algosdk.base64ToBytes(this.arc56.source[program]),
     );
 
     if (expectedVarsCount !== providedVarsCount) {
@@ -430,7 +396,7 @@ export class ARC56AppClient {
         if (isUint) {
           formattedVal = val.toString();
         } else if (val instanceof Uint8Array) {
-          formattedVal = "0x" + Buffer.from(val).toString("hex");
+          formattedVal = "0x" + algosdk.bytesToHex(val);
         } else if (typeof val === "string" && val.startsWith("0x")) {
           formattedVal = val;
         } else {
@@ -449,7 +415,7 @@ export class ARC56AppClient {
     }
 
     const result = await this.algod.compile(tealString).do();
-    return new Uint8Array(Buffer.from(result.result, "base64"));
+    return algosdk.base64ToBytes(result.result);
   }
 
   getParams<TReturn = unknown>(
@@ -477,7 +443,7 @@ export class ARC56AppClient {
         : [arc56Method.recommendations.boxes];
       boxes = recBoxes.map((b) => ({
         appIndex: b.app ?? 0,
-        name: new Uint8Array(Buffer.from(b.key, "base64")),
+        name: algosdk.base64ToBytes(b.key),
       }));
     }
 
@@ -930,7 +896,7 @@ export class ARC56AppClient {
         const encodedKey = new Uint8Array(prefixBytes.length + keyBytes.length);
         encodedKey.set(prefixBytes, 0);
         encodedKey.set(keyBytes, prefixBytes.length);
-        const b64Key = Buffer.from(encodedKey).toString("base64");
+        const b64Key = algosdk.bytesToBase64(encodedKey);
 
         if (this.arc56.state?.maps?.global?.[mapName]) {
           return (await this.getGlobalStateValue(

@@ -4,10 +4,8 @@ import type {
   StructFields,
   StructField,
   Method,
-} from "./types/arc56";
-import * as fs from "fs";
-import * as path from "path";
-import { getAbiMethodFromDefinition } from "./arc56_utils";
+} from "./types/arc56.ts";
+import { getAbiMethodFromDefinition } from "./arc56_utils.ts";
 
 export interface ARC56GeneratorOptions {
   /**
@@ -689,9 +687,12 @@ export default ${this.arc56.name}Client;
   }
 
   async generateToFile(filePath: string): Promise<void> {
+    // Loaded lazily so the library has no top-level Node.js imports
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
     const code = await this.generate();
-    await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
-    await fs.promises.writeFile(filePath, code, "utf-8");
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, code, "utf-8");
   }
 }
 

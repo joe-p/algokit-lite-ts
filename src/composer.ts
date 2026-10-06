@@ -8,13 +8,13 @@ import algosdk, {
   type SuggestedParams,
   type TransactionSigner,
 } from "algosdk";
-import type { ARC56Contract } from "./types/arc56";
+import type { ARC56Contract } from "./types/arc56.ts";
 import {
   decodeMethodReturnValue,
   encodeMethodArgs,
   getAbiMethod,
-} from "./arc56_utils";
-import { populateAppCallResources } from "./resource_population";
+} from "./arc56_utils.ts";
+import { populateAppCallResources } from "./resource_population.ts";
 
 const USAGE_SCALE = 1_000_000n;
 export const BASE_USAGE = 1_000_000n;
@@ -800,7 +800,7 @@ export class Composer<TReturns extends unknown[] = []> {
               : [arc56Method.recommendations.boxes];
             boxes = recBoxes.map((b) => ({
               appIndex: b.app ?? 0,
-              name: new Uint8Array(Buffer.from(b.key, "base64")),
+              name: algosdk.base64ToBytes(b.key),
             }));
           }
 
