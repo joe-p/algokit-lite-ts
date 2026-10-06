@@ -28,6 +28,18 @@ export type ComposerSender = AddressWithTransactionSigner & {
   emptyTxnSigner?: TransactionSigner;
 };
 
+export type ComposerSimulateOptions = Omit<
+  ConstructorParameters<typeof algosdk.modelsv2.SimulateRequest>[0],
+  "txnGroups"
+> & {
+  skipSignatures?: boolean;
+  /**
+   * Throw when the group fails rather than returning the simulate response.
+   * Defaults to true.
+   */
+  throwOnFailure?: boolean;
+};
+
 type TxnInfo = {
   feePercent?: number;
   /** Most group usage the transaction may pay for once its fee is adjusted. */
@@ -866,11 +878,13 @@ export class Composer<TReturns extends unknown[] = []> {
     return { group: this.atc.buildGroup(), ...simulated };
   }
 
-  /** Throw the failure of a simulation that was run to determine fees */
+  /** Throw the failure of a simulation, with the response as its cause */
   private static throwSimulationFailure(
     simulateResponse: algosdk.modelsv2.SimulateResponse,
   ): never {
-    throw new Error(simulateResponse.txnGroups[0]?.failureMessage);
+    throw new Error(simulateResponse.txnGroups[0]?.failureMessage, {
+      cause: simulateResponse,
+    });
   }
 
   async buildGroup(algod: Algodv2) {
@@ -948,21 +962,67 @@ export class Composer<TReturns extends unknown[] = []> {
 
   async simulate(
     algod: Algodv2,
-    request?: algosdk.modelsv2.SimulateRequest,
+    simRequest?: ComposerSimulateOptions,
   ): Promise<{
     methodResults: MethodResults<TReturns>;
     simulateResponse: algosdk.modelsv2.SimulateResponse;
   }> {
+    if (
+      simRequest?.skipSignatures &&
+      (simRequest.allowEmptySignatures === false ||
+        simRequest.fixSigners === false)
+    ) {
+      throw Error(
+        "Cannot simulate with skipSignatures when allowEmptySignatures or fixSigners is set to false",
+      );
+    }
+
+    const {
+      skipSignatures,
+      throwOnFailure = true,
+      ...requestParams
+    } = simRequest ?? {};
+    const request = new algosdk.modelsv2.SimulateRequest({
+      ...requestParams,
+      txnGroups: [],
+      // ?? so an explicit undefined doesn't turn these off under skipSignatures
+      fixSigners: requestParams.fixSigners ?? skipSignatures,
+      allowEmptySignatures:
+        requestParams.allowEmptySignatures ?? skipSignatures,
+    });
+
     const { failedSimulation } = await this._buildGroup(algod, request);
     // The group failed while determining fees. Simulating it again with
     // unadjusted fees would only fail on fees, so return the original failure.
     if (failedSimulation) {
+      if (throwOnFailure) Composer.throwSimulationFailure(failedSimulation);
       return {
         simulateResponse: failedSimulation,
         methodResults: [] as unknown as MethodResults<TReturns>,
       };
     }
-    const result = await this.atc.simulate(algod, request);
+    let simAtc = this.atc;
+    if (skipSignatures) {
+      // Clone to keep the method calls for decoding results, then swap each
+      // signer for the sender's empty signer
+      simAtc = this.atc.clone();
+      const simTxns = (
+        simAtc as unknown as { transactions: algosdk.TransactionWithSigner[] }
+      ).transactions;
+      for (const [i, simTxn] of simTxns.entries()) {
+        simTxn.signer =
+          this.txnInfo[i]?.sender.emptyTxnSigner ??
+          algosdk.makeEmptyTransactionSigner();
+      }
+    }
+
+    const result = await simAtc.simulate(algod, request);
+    if (
+      throwOnFailure &&
+      result.simulateResponse.txnGroups[0]?.failureMessage
+    ) {
+      Composer.throwSimulationFailure(result.simulateResponse);
+    }
 
     return {
       simulateResponse: result.simulateResponse,

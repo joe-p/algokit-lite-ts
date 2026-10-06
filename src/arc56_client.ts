@@ -6,11 +6,16 @@ import algosdk, {
 import {
   Composer,
   type AppCreateParams,
+  type ComposerSender,
   type ARC56MethodParams,
   type MethodParams,
   type MethodResult,
 } from "./composer";
-import { type ARC56Contract, type StorageMap } from "./types/arc56";
+import {
+  type ARC56Contract,
+  type Method,
+  type StorageMap,
+} from "./types/arc56";
 import {
   getABIType as utilsGetABIType,
   getABITypeFromStructFields as utilsGetABITypeFromStructFields,
@@ -20,6 +25,7 @@ import {
   getTypeScriptValue as utilsGetTypeScriptValue,
   decodeMethodReturnValue as utilsDecodeMethodReturnValue,
   getAbiMethod,
+  parseLogicError,
   type StructDef,
 } from "./arc56_utils";
 
@@ -101,6 +107,20 @@ export type MethodExecutionResult = {
   methodResults: MethodResult[];
 };
 
+export type SimulateMethodParams = Omit<AppClientMethodParams, "sender"> & {
+  sender: ComposerSender;
+};
+
+export type MethodSimulationResult = {
+  simulateResponse: algosdk.modelsv2.SimulateResponse;
+  methodResults: MethodResult[];
+};
+
+export type MethodSimulateCallResult<TReturn = unknown> = {
+  result: MethodSimulationResult;
+  returnValue: TReturn;
+};
+
 export type MethodCallResult<TReturn = unknown> = {
   result: MethodExecutionResult;
   returnValue: TReturn;
@@ -173,97 +193,8 @@ export class ARC56AppClient {
     } catch (e: unknown) {
       const eMsg = e instanceof Error ? e.message : "";
       const str = eMsg ? `${eMsg} ${JSON.stringify(e)}` : JSON.stringify(e);
-      const txId =
-        str.match(/(?:transaction\s+)(\S+?)(?=:|\s)/)?.[1] ??
-        str.match(/(?<=transaction\s+)\S+(?=:)/)?.[0];
-
-      const appIdStr =
-        str.match(/(?:app=)(\d+)/)?.[1] ??
-        str.match(/(?:application\s+\((\d+)\))/)?.[1];
-      const appId = appIdStr !== undefined ? BigInt(appIdStr) : undefined;
-
-      const pcStr = str.match(/(?:pc=)(\d+)/)?.[1];
-      const pc = pcStr !== undefined ? Number(pcStr) : undefined;
-
-      if (this.appId !== 0n && appId !== undefined && appId !== this.appId) {
-        throw e;
-      }
-
-      let errorMessage: string | undefined;
-      if (pc !== undefined && this.arc56.sourceInfo) {
-        if (Array.isArray(this.arc56.sourceInfo)) {
-          errorMessage = this.arc56.sourceInfo.find((s) =>
-            s.pc.includes(pc),
-          )?.errorMessage;
-        } else {
-          const approvalInfo = this.arc56.sourceInfo.approval;
-          let targetPc = pc;
-          if (approvalInfo.pcOffsetMethod === "cblocks") {
-            const approvalByteCode = this.arc56.byteCode?.approval
-              ? new Uint8Array(
-                  Buffer.from(this.arc56.byteCode.approval, "base64"),
-                )
-              : undefined;
-            if (approvalByteCode) {
-              const offset = this.getConstantBlockOffset(approvalByteCode);
-              targetPc = pc - offset;
-            }
-          }
-          errorMessage = approvalInfo.sourceInfo.find((s) =>
-            s.pc.includes(targetPc),
-          )?.errorMessage;
-        }
-      }
-
-      if (errorMessage) {
-        throw Error(
-          `Runtime error when executing ${this.arc56.name} (appId: ${appId ?? this.appId}) in transaction ${txId}: ${errorMessage}`,
-          { cause: e },
-        );
-      }
-
-      throw e;
+      throw parseLogicError(this.arc56, this.appId, str, e) ?? e;
     }
-  }
-
-  private getConstantBlockOffset(program: Uint8Array): number {
-    const BYTE_CBLOCK = 38;
-    const INT_CBLOCK = 32;
-    const bytes = [...program];
-    const programSize = bytes.length;
-    bytes.shift(); // remove version
-
-    let bytecblockOffset: number | undefined;
-    let intcblockOffset: number | undefined;
-
-    while (bytes.length > 0) {
-      const byte = bytes.shift();
-      if (byte === undefined) break;
-      if (byte === BYTE_CBLOCK || byte === INT_CBLOCK) {
-        const isBytecblock = byte === BYTE_CBLOCK;
-        const valuesRemaining = bytes.shift() ?? 0;
-        for (let i = 0; i < valuesRemaining; i++) {
-          if (isBytecblock) {
-            const length = bytes.shift() ?? 0;
-            bytes.splice(0, length);
-          } else {
-            while (((bytes.shift() ?? 0) & 0x80) !== 0) {
-              // intcblock is a uvarint
-            }
-          }
-        }
-        if (isBytecblock) bytecblockOffset = programSize - bytes.length - 1;
-        else intcblockOffset = programSize - bytes.length - 1;
-
-        if (bytes[0] !== BYTE_CBLOCK && bytes[0] !== INT_CBLOCK) {
-          break;
-        }
-      } else {
-        break;
-      }
-    }
-
-    return Math.max(bytecblockOffset ?? 0, intcblockOffset ?? 0);
   }
 
   private getABITypeFromStructFields(structFields: StructDef): string {
@@ -582,10 +513,11 @@ export class ARC56AppClient {
     };
   }
 
-  private async callWithOC<TReturn = unknown>(
+  /** Compose a call of an ARC56 method, checking the OnComplete is allowed */
+  private composeMethodCall(
     onComplete: algosdk.OnApplicationComplete,
     params: AppClientMethodParams,
-  ): Promise<MethodCallResult<TReturn>> {
+  ) {
     const callOrCreate = this.appId === 0n ? "create" : "call";
 
     const composer = new Composer({
@@ -614,22 +546,88 @@ export class ARC56AppClient {
       throw Error(`${ocString} is not supported for ${identifier}`);
     }
 
+    return { composer, arc56Method };
+  }
+
+  /** Decode the return value of the last method call in a group */
+  private lastReturnValue(
+    method: algosdk.ABIMethod | string,
+    arc56Method: Method,
+    methodResults: MethodResult[],
+  ): unknown {
+    if (!(arc56Method.returns.struct ?? arc56Method.returns.type !== "void")) {
+      return undefined;
+    }
+    const lastRes = methodResults.at(-1);
+    if (lastRes?.rawReturnValue && lastRes.rawReturnValue.length > 0) {
+      return this.decodeMethodReturnValue(method, lastRes.rawReturnValue);
+    }
+    return undefined;
+  }
+
+  private async callWithOC<TReturn = unknown>(
+    onComplete: algosdk.OnApplicationComplete,
+    params: AppClientMethodParams,
+  ): Promise<MethodCallResult<TReturn>> {
+    const { composer, arc56Method } = this.composeMethodCall(
+      onComplete,
+      params,
+    );
+
     const result = await this.executeWithErrorParsing(composer);
 
-    let returnValue: unknown = undefined;
-
-    if (arc56Method.returns.struct ?? arc56Method.returns.type !== "void") {
-      const lastRes = result.methodResults.at(-1);
-      if (lastRes?.rawReturnValue && lastRes.rawReturnValue.length > 0) {
-        returnValue = this.decodeMethodReturnValue(
-          params.method,
-          lastRes.rawReturnValue,
-        );
-      }
-    }
     return {
       result,
-      returnValue: returnValue as TReturn,
+      returnValue: this.lastReturnValue(
+        params.method,
+        arc56Method,
+        result.methodResults,
+      ) as TReturn,
+    };
+  }
+
+  /**
+   * Simulate a NoOp method call instead of sending it, as is done for readonly
+   * methods. Nothing is signed, so the sender's signer is never called. Throws if
+   * the call fails, with the ARC56 error message when the source info has one.
+   */
+  async simulateMethodCall<TReturn = unknown>(
+    params: SimulateMethodParams,
+  ): Promise<MethodSimulateCallResult<TReturn>> {
+    const { composer, arc56Method } = this.composeMethodCall(
+      algosdk.OnApplicationComplete.NoOpOC,
+      params,
+    );
+
+    const { simulateResponse, methodResults } = await composer.simulate(
+      this.algod,
+      {
+        skipSignatures: true,
+        allowUnnamedResources: true,
+        // Thrown below, with the ARC56 error message
+        throwOnFailure: false,
+      },
+    );
+
+    const failureMessage = simulateResponse.txnGroups[0]?.failureMessage;
+    if (failureMessage) {
+      throw (
+        parseLogicError(
+          this.arc56,
+          this.appId,
+          failureMessage,
+          simulateResponse,
+        ) ?? Error(failureMessage, { cause: simulateResponse })
+      );
+    }
+
+    return {
+      result: { simulateResponse, methodResults },
+      returnValue: this.lastReturnValue(
+        params.method,
+        arc56Method,
+        methodResults,
+      ) as TReturn,
     };
   }
 
