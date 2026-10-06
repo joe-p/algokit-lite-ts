@@ -213,8 +213,10 @@ export class ARC56Generator {
           abiType: t,
           tsType: "PaymentParams | algosdk.TransactionWithSigner",
         });
-      } else if (["axfer", "afrz", "keyreg", "appl", "acfg"].includes(t)) {
-        typeMap.push({ abiType: t, tsType: "algosdk.Transaction" });
+      } else if (
+        ["axfer", "afrz", "keyreg", "appl", "acfg", "txn"].includes(t)
+      ) {
+        typeMap.push({ abiType: t, tsType: "algosdk.TransactionWithSigner" });
       } else {
         typeMap.push({ abiType: t, tsType: "any" });
       }
