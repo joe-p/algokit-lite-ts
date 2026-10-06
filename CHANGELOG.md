@@ -1,3 +1,9 @@
+# 0.5.0 - October 6th, 2026
+
+## Features
+
+- The `algokit-lite` CLI runs on Node.js (via `tsx`) and no longer requires Bun.
+
 # 0.4.0 - October 6th, 2026
 
 ## Breaking Changes
