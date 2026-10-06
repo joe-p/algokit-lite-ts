@@ -330,3 +330,106 @@ export function getAbiMethodFromDefinition(
     });
   }
 }
+
+/**
+ * The size of the constant blocks at the start of a program. Programs whose
+ * source info uses the "cblocks" pcOffsetMethod record pcs relative to the end
+ * of these blocks.
+ */
+function getConstantBlockOffset(program: Uint8Array): number {
+  const BYTE_CBLOCK = 38;
+  const INT_CBLOCK = 32;
+  const bytes = [...program];
+  const programSize = bytes.length;
+  bytes.shift(); // remove version
+
+  let bytecblockOffset: number | undefined;
+  let intcblockOffset: number | undefined;
+
+  while (bytes.length > 0) {
+    const byte = bytes.shift();
+    if (byte === undefined) break;
+    if (byte === BYTE_CBLOCK || byte === INT_CBLOCK) {
+      const isBytecblock = byte === BYTE_CBLOCK;
+      const valuesRemaining = bytes.shift() ?? 0;
+      for (let i = 0; i < valuesRemaining; i++) {
+        if (isBytecblock) {
+          const length = bytes.shift() ?? 0;
+          bytes.splice(0, length);
+        } else {
+          while (((bytes.shift() ?? 0) & 0x80) !== 0) {
+            // intcblock is a uvarint
+          }
+        }
+      }
+      if (isBytecblock) bytecblockOffset = programSize - bytes.length - 1;
+      else intcblockOffset = programSize - bytes.length - 1;
+
+      if (bytes[0] !== BYTE_CBLOCK && bytes[0] !== INT_CBLOCK) {
+        break;
+      }
+    } else {
+      break;
+    }
+  }
+
+  return Math.max(bytecblockOffset ?? 0, intcblockOffset ?? 0);
+}
+
+/**
+ * Turn a logic error from algod (when executing or simulating) into an error
+ * carrying the ARC56 errorMessage for the failing pc. Returns undefined when
+ * the error is from another app or the source info has no message for it.
+ *
+ * @param appId - The app the contract is deployed as, or 0 when creating it
+ * @param message - The text of the error, which includes the pc and app id
+ */
+export function parseLogicError(
+  arc56: ARC56Contract,
+  appId: bigint,
+  message: string,
+  cause?: unknown,
+): Error | undefined {
+  const txId =
+    message.match(/(?:transaction\s+)(\S+?)(?=:|\s)/)?.[1] ??
+    message.match(/(?<=transaction\s+)\S+(?=:)/)?.[0];
+
+  const appIdStr =
+    message.match(/(?:app=)(\d+)/)?.[1] ??
+    message.match(/(?:application\s+\((\d+)\))/)?.[1];
+  const errAppId = appIdStr !== undefined ? BigInt(appIdStr) : undefined;
+
+  const pcStr = message.match(/(?:pc=)(\d+)/)?.[1];
+  const pc = pcStr !== undefined ? Number(pcStr) : undefined;
+
+  if (appId !== 0n && errAppId !== undefined && errAppId !== appId) {
+    return undefined;
+  }
+
+  if (pc === undefined || !arc56.sourceInfo) return undefined;
+
+  let errorMessage: string | undefined;
+  if (Array.isArray(arc56.sourceInfo)) {
+    errorMessage = arc56.sourceInfo.find((s) =>
+      s.pc.includes(pc),
+    )?.errorMessage;
+  } else {
+    const approvalInfo = arc56.sourceInfo.approval;
+    let targetPc = pc;
+    if (approvalInfo.pcOffsetMethod === "cblocks" && arc56.byteCode?.approval) {
+      targetPc =
+        pc -
+        getConstantBlockOffset(algosdk.base64ToBytes(arc56.byteCode.approval));
+    }
+    errorMessage = approvalInfo.sourceInfo.find((s) =>
+      s.pc.includes(targetPc),
+    )?.errorMessage;
+  }
+
+  if (!errorMessage) return undefined;
+
+  return Error(
+    `Runtime error when executing ${arc56.name} (appId: ${errAppId ?? appId}) in transaction ${txId}: ${errorMessage}`,
+    { cause },
+  );
+}

@@ -38,6 +38,11 @@ export class ARC56Generator {
     return { name, property: overloaded ? JSON.stringify(name) : name };
   }
 
+  /** Whether `call.<method>()` simulates the method rather than sending it */
+  private isSimulated(method: Method): boolean {
+    return method.readonly === true && method.actions.call.includes("NoOp");
+  }
+
   getTypeScriptType(type: string): string {
     if (!type) return "void";
 
@@ -365,10 +370,20 @@ export class ARC56Generator {
         const { name, property } = this.getMethodKey(m);
         const retType = `${this.arc56.name}ReturnTypes[${JSON.stringify(name)}]`;
 
+        // Readonly methods are simulated rather than sent
+        const simulated = oc === "NoOp" && this.isSimulated(m);
+        const paramsType = simulated
+          ? "TypedSimulateMethodParams"
+          : "TypedMethodParams";
+        const resultType = simulated
+          ? "MethodSimulationResult"
+          : "MethodExecutionResult";
+        const callMethod = simulated ? "simulateMethodCall" : clientMethod;
+
         if (m.args.length === 0) {
           lines.push(
-            `${property}: async (methodParams: TypedMethodParams = {}): Promise<{ result: MethodExecutionResult; returnValue: ${retType} }> => {`,
-            `  return this.${clientMethod}({ method: ${JSON.stringify(name)}, ...methodParams, methodArgs: [] });`,
+            `${property}: async (methodParams: ${paramsType} = {}): Promise<{ result: ${resultType}; returnValue: ${retType} }> => {`,
+            `  return this.${callMethod}({ method: ${JSON.stringify(name)}, ...methodParams, methodArgs: [] });`,
             "},",
           );
         } else {
@@ -378,8 +393,8 @@ export class ARC56Generator {
             .join(", ");
 
           lines.push(
-            `${property}: async (methodParams: TypedMethodParams<${argsType}>): Promise<{ result: MethodExecutionResult; returnValue: ${retType} }> => {`,
-            `  return this.${clientMethod}({ method: ${JSON.stringify(name)}, ...methodParams, methodArgs: [${methodArgsStr}] });`,
+            `${property}: async (methodParams: ${paramsType}<${argsType}>): Promise<{ result: ${resultType}; returnValue: ${retType} }> => {`,
+            `  return this.${callMethod}({ method: ${JSON.stringify(name)}, ...methodParams, methodArgs: [${methodArgsStr}] });`,
             "},",
           );
         }
@@ -598,6 +613,18 @@ export class ARC56Generator {
 >;`
       : "";
 
+    const hasSimulated = this.arc56.methods.some((m) => this.isSimulated(m));
+    const simulateImports = hasSimulated
+      ? "\n  type SimulateMethodParams,\n  type MethodSimulationResult,"
+      : "";
+    const simulateParamsType = hasSimulated
+      ? `\ntype TypedSimulateMethodParams<TArgs = undefined> = Omit<
+  SimulateMethodParams,
+  "method" | "methodArgs"
+> &
+  (TArgs extends undefined ? { args?: undefined } : { args: TArgs });`
+      : "";
+
     const content = `/* eslint-disable */
 import algosdk from "algosdk";
 import {
@@ -605,7 +632,7 @@ import {
   type AppClientMethodParams,${bareImports}
   type CreateMethodParams,
   type MethodParams,
-  type MethodExecutionResult,
+  type MethodExecutionResult,${simulateImports}
   type PaymentParams,
   type ARC56Contract,
 } from "${clientImportPath}";
@@ -619,7 +646,7 @@ type TypedCreateMethodParams<TArgs = undefined> = Omit<
   CreateMethodParams,
   "method" | "methodArgs"
 > &
-  (TArgs extends undefined ? { args?: undefined } : { args: TArgs });${bareParamsType}
+  (TArgs extends undefined ? { args?: undefined } : { args: TArgs });${simulateParamsType}${bareParamsType}
 
 export const ARC56_JSON = ${JSON.stringify(JSON.stringify(this.arc56))};
 

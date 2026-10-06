@@ -963,7 +963,9 @@ export class Composer<TReturns extends unknown[] = []> {
       (simRequest.allowEmptySignatures === false ||
         simRequest.fixSigners === false)
     ) {
-      throw Error('Cannot simulate with skipSignatures when allowEmptySignatures or fixSigners is set to false')
+      throw Error(
+        "Cannot simulate with skipSignatures when allowEmptySignatures or fixSigners is set to false",
+      );
     }
 
     const request = new algosdk.modelsv2.SimulateRequest({
