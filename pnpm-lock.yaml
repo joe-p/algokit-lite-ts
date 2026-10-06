@@ -11,9 +11,9 @@ importers:
       algosdk:
         specifier: ^3.7.0
         version: 3.8.0
-      tsx:
-        specifier: ^4.23.15
-        version: 4.23.15
+      prettier:
+        specifier: ^3.9.6
+        version: 3.9.9
       tweetnacl:
         specifier: ^1.0.3
         version: 1.0.3
@@ -30,12 +30,12 @@ importers:
       eslint:
         specifier: ^10.10.0
         version: 10.12.0
-      prettier:
-        specifier: ^3.9.6
-        version: 3.9.9
       semfrag:
         specifier: ^0.9.0
         version: 0.9.0
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
       typescript:
         specifier: npm:@typescript/typescript6@^6.0.2
         version: '@typescript/typescript6@6.0.2'

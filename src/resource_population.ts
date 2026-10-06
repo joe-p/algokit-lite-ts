@@ -85,8 +85,8 @@ function sortResources(r: UnnamedResources) {
   r.apps?.sort(compare);
   r.boxes?.sort((a, b) =>
     compare(
-      `${a.app}-${Buffer.from(a.name).toString("hex")}`,
-      `${b.app}-${Buffer.from(b.name).toString("hex")}`,
+      `${a.app}-${algosdk.bytesToHex(a.name)}`,
+      `${b.app}-${algosdk.bytesToHex(b.name)}`,
     ),
   );
   r.appLocals?.sort((a, b) =>

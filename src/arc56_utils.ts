@@ -4,7 +4,7 @@ import type {
   Method,
   StructField,
   StructFields,
-} from "./types/arc56";
+} from "./types/arc56.ts";
 
 export function isRecord(val: unknown): val is Record<string, unknown> {
   return typeof val === "object" && val !== null && !Array.isArray(val);

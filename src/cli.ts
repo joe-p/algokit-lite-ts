@@ -1,7 +1,8 @@
+#!/usr/bin/env node
 import * as fs from "fs";
 import * as path from "path";
-import { ARC56Generator } from "./generator";
-import type { ARC56Contract } from "./types/arc56";
+import { ARC56Generator } from "./generator.ts";
+import type { ARC56Contract } from "./types/arc56.ts";
 
 const HELP = `
 algoKIT lite: typed client generator
@@ -28,7 +29,7 @@ interface CliOptions {
 
 function printVersion(): void {
   const content = fs.readFileSync(
-    path.join(__dirname, "..", "package.json"),
+    new URL("../package.json", import.meta.url),
     "utf-8",
   );
   const pkg = JSON.parse(content) as { version?: string };
