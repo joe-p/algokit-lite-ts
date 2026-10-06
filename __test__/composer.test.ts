@@ -274,6 +274,113 @@ describe("Composer ARC56", () => {
     });
   });
 
+  it("should not call the sender's signer when simulating with skipSignatures", async () => {
+    const unsignableSender = {
+      address: sender.address,
+      // eslint-disable-next-line @typescript-eslint/require-await
+      txnSigner: async () => {
+        throw new Error("signer should not be called");
+      },
+    };
+    const composer = localnet.composer();
+    const inputs = { add: { a: 1n, b: 2n }, subtract: { a: 3n, b: 1n } };
+
+    composer.addMethodCall({
+      arc56,
+      appID: appId,
+      method: "foo",
+      sender: unsignableSender,
+      methodArgs: [inputs],
+    });
+
+    const simResult = await composer.simulate(localnet.algod, {
+      skipSignatures: true,
+    });
+    expect(simResult.simulateResponse.txnGroups[0]?.failureMessage).toBe(
+      undefined,
+    );
+    expect(simResult.methodResults.length).toBe(1);
+    expect(getResult(simResult, 0).returnValue).toEqual({
+      sum: 3n,
+      difference: 2n,
+    });
+  });
+
+  it("should use the sender's emptyTxnSigner when simulating with skipSignatures", async () => {
+    let emptySignerCalls = 0;
+    const emptySender = {
+      ...sender,
+      // eslint-disable-next-line @typescript-eslint/require-await
+      txnSigner: async () => {
+        throw new Error("signer should not be called");
+      },
+      emptyTxnSigner: (
+        txns: algosdk.Transaction[],
+        indexes: number[],
+      ): Promise<Uint8Array[]> => {
+        emptySignerCalls += 1;
+        return algosdk.makeEmptyTransactionSigner()(txns, indexes);
+      },
+    };
+    const composer = localnet.composer();
+
+    composer
+      .addPayment({
+        sender: emptySender,
+        receiver: sender.address,
+        amount: 0n,
+        note: new TextEncoder().encode("empty signer"),
+      })
+      .addPayment({
+        sender,
+        receiver: sender.address,
+        amount: 0n,
+        note: new TextEncoder().encode("default empty signer"),
+      });
+
+    const simResult = await composer.simulate(localnet.algod, {
+      skipSignatures: true,
+    });
+    expect(simResult.simulateResponse.txnGroups[0]?.failureMessage).toBe(
+      undefined,
+    );
+    // Once when simulating for fees, once more for the final simulate
+    expect(emptySignerCalls).toBe(2);
+  });
+
+  it("should use the sender's signer when simulating without skipSignatures", () => {
+    const unsignableSender = {
+      address: sender.address,
+      // eslint-disable-next-line @typescript-eslint/require-await
+      txnSigner: async () => {
+        throw new Error("signer was called");
+      },
+    };
+
+    expect(
+      localnet
+        .composer()
+        .addPayment({
+          sender: unsignableSender,
+          receiver: sender.address,
+          amount: 0n,
+        })
+        .simulate(localnet.algod),
+    ).rejects.toThrow("signer was called");
+  });
+
+  it("should throw when skipSignatures is combined with allowEmptySignatures: false", () => {
+    expect(
+      localnet
+        .composer()
+        .addPayment({ sender, receiver: sender.address, amount: 0n })
+        .simulate(localnet.algod, {
+          skipSignatures: true,
+          allowEmptySignatures: false,
+        }),
+    ).rejects.toThrow("Cannot simulate with skipSignatures");
+  });
+
   it("should support latest ARC56 StructField[] format in Composer", async () => {
     const arc56LatestStructs: ARC56Contract = {
       ...arc56,

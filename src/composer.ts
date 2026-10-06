@@ -28,6 +28,11 @@ export type ComposerSender = AddressWithTransactionSigner & {
   emptyTxnSigner?: TransactionSigner;
 };
 
+export type ComposerSimulateOptions = Omit<
+  ConstructorParameters<typeof algosdk.modelsv2.SimulateRequest>[0],
+  "txnGroups"
+> & { skipSignatures?: boolean };
+
 type TxnInfo = {
   feePercent?: number;
   /** Most group usage the transaction may pay for once its fee is adjusted. */
@@ -948,11 +953,26 @@ export class Composer<TReturns extends unknown[] = []> {
 
   async simulate(
     algod: Algodv2,
-    request?: algosdk.modelsv2.SimulateRequest,
+    simRequest?: ComposerSimulateOptions,
   ): Promise<{
     methodResults: MethodResults<TReturns>;
     simulateResponse: algosdk.modelsv2.SimulateResponse;
   }> {
+    if (
+      simRequest?.skipSignatures &&
+      (simRequest.allowEmptySignatures === false ||
+        simRequest.fixSigners === false)
+    ) {
+      throw Error('Cannot simulate with skipSignatures when allowEmptySignatures or fixSigners is set to false')
+    }
+
+    const request = new algosdk.modelsv2.SimulateRequest({
+      txnGroups: [],
+      fixSigners: simRequest?.skipSignatures,
+      allowEmptySignatures: simRequest?.skipSignatures,
+      ...simRequest,
+    });
+
     const { failedSimulation } = await this._buildGroup(algod, request);
     // The group failed while determining fees. Simulating it again with
     // unadjusted fees would only fail on fees, so return the original failure.
@@ -962,7 +982,22 @@ export class Composer<TReturns extends unknown[] = []> {
         methodResults: [] as unknown as MethodResults<TReturns>,
       };
     }
-    const result = await this.atc.simulate(algod, request);
+    let simAtc = this.atc;
+    if (simRequest?.skipSignatures) {
+      // Clone to keep the method calls for decoding results, then swap each
+      // signer for the sender's empty signer
+      simAtc = this.atc.clone();
+      const simTxns = (
+        simAtc as unknown as { transactions: algosdk.TransactionWithSigner[] }
+      ).transactions;
+      for (const [i, simTxn] of simTxns.entries()) {
+        simTxn.signer =
+          this.txnInfo[i]?.sender.emptyTxnSigner ??
+          algosdk.makeEmptyTransactionSigner();
+      }
+    }
+
+    const result = await simAtc.simulate(algod, request);
 
     return {
       simulateResponse: result.simulateResponse,
