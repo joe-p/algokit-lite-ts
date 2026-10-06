@@ -418,6 +418,20 @@ describe("Composer ARC56", () => {
     ).rejects.toThrow("Cannot simulate with skipSignatures");
   });
 
+  it("should keep skipSignatures defaults when allowEmptySignatures and fixSigners are explicitly undefined", async () => {
+    const simResult = await localnet
+      .composer()
+      .addPayment({ sender, receiver: sender.address, amount: 0n })
+      .simulate(localnet.algod, {
+        skipSignatures: true,
+        allowEmptySignatures: undefined,
+        fixSigners: undefined,
+      });
+    expect(simResult.simulateResponse.txnGroups[0]?.failureMessage).toBe(
+      undefined,
+    );
+  });
+
   it("should support latest ARC56 StructField[] format in Composer", async () => {
     const arc56LatestStructs: ARC56Contract = {
       ...arc56,

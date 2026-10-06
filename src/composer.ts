@@ -983,10 +983,12 @@ export class Composer<TReturns extends unknown[] = []> {
       ...requestParams
     } = simRequest ?? {};
     const request = new algosdk.modelsv2.SimulateRequest({
-      txnGroups: [],
-      fixSigners: skipSignatures,
-      allowEmptySignatures: skipSignatures,
       ...requestParams,
+      txnGroups: [],
+      // ?? so an explicit undefined doesn't turn these off under skipSignatures
+      fixSigners: requestParams.fixSigners ?? skipSignatures,
+      allowEmptySignatures:
+        requestParams.allowEmptySignatures ?? skipSignatures,
     });
 
     const { failedSimulation } = await this._buildGroup(algod, request);
