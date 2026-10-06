@@ -27,8 +27,9 @@ ${GET_POINT}
 ${selector("mustBePositive(uint64)uint64")}
 ${selector("callOther(uint64)uint64")}
 ${selector("write()void")}
-uncover 4
-match getPoint mustBePositive callOther write
+${selector("getSeven()uint64")}
+uncover 5
+match getPoint mustBePositive callOther write getSeven
 err
 create:
 intc_1
@@ -82,6 +83,14 @@ intc_1
 return
 write:
 intc_1
+return
+getSeven:
+bytec_0
+pushint 7
+itob
+concat
+log
+intc_1
 return`;
 
 const CLEAR = `#pragma version 10
@@ -115,6 +124,13 @@ const methods: ARC56Contract["methods"] = [
     args: [],
     returns: { type: "void" },
     actions: { create: [], call: ["NoOp"] },
+  },
+  {
+    name: "getSeven",
+    args: [],
+    returns: { type: "uint64" },
+    actions: { create: [], call: ["NoOp"] },
+    readonly: true,
   },
 ];
 
@@ -198,7 +214,7 @@ describe("readonly methods", () => {
 
   type GeneratedClient = ARC56AppClient & {
     call: Record<
-      "getPoint" | "write",
+      "getPoint" | "getSeven" | "write",
       (params: unknown) => Promise<{
         returnValue: unknown;
         result: { simulateResponse?: algosdk.modelsv2.SimulateResponse };
@@ -238,7 +254,12 @@ describe("readonly methods", () => {
   it("generates simulate-backed call entries only for readonly methods", async () => {
     const code = await new ARC56Generator(contract("array")).generate();
     const callBody = code.split("call = {")[1]?.split("\n  };")[0] ?? "";
-    for (const name of ["getPoint", "mustBePositive", "callOther"]) {
+    for (const name of [
+      "getPoint",
+      "mustBePositive",
+      "callOther",
+      "getSeven",
+    ]) {
       expect(callBody).toContain(
         `this.simulateMethodCall({\n        method: "${name}",`,
       );
@@ -269,10 +290,13 @@ async function usage() {
   const point: Point = returnValue;
   const response: algosdk.modelsv2.SimulateResponse = result.simulateResponse;
   const n: bigint = (await client.call.mustBePositive({ sender: algosdk.Address.zeroAddress(), args: { n: 1n } })).returnValue;
+  const seven: bigint = (await client.call.getSeven({ sender: algosdk.Address.zeroAddress() })).returnValue;
+  // @ts-expect-error simulated methods require a sender
+  await client.call.getSeven();
   const round: bigint = (await client.call.write({ sender: { address: algosdk.Address.zeroAddress(), txnSigner: algosdk.makeEmptyTransactionSigner() } })).result.confirmedRound;
   // @ts-expect-error execute results are not returned for readonly methods
   result.confirmedRound;
-  return [point, response, n, round];
+  return [point, response, n, seven, round];
 }
 `;
     expect(typeCheck(code + usage)).toEqual([]);
@@ -304,6 +328,11 @@ async function usage() {
       expect(result.simulateResponse?.txnGroups[0]?.failureMessage).toBe(
         undefined,
       );
+      expect(signed).toBe(0);
+      expect(send).not.toHaveBeenCalled();
+
+      // Including readonly methods with no args
+      expect((await client.call.getSeven({ sender })).returnValue).toBe(7n);
       expect(signed).toBe(0);
       expect(send).not.toHaveBeenCalled();
 

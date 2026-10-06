@@ -381,8 +381,10 @@ export class ARC56Generator {
         const callMethod = simulated ? "simulateMethodCall" : clientMethod;
 
         if (m.args.length === 0) {
+          // Simulate params require a sender, so they can't default to {}
+          const paramsDefault = simulated ? "" : " = {}";
           lines.push(
-            `${property}: async (methodParams: ${paramsType} = {}): Promise<{ result: ${resultType}; returnValue: ${retType} }> => {`,
+            `${property}: async (methodParams: ${paramsType}${paramsDefault}): Promise<{ result: ${resultType}; returnValue: ${retType} }> => {`,
             `  return this.${callMethod}({ method: ${JSON.stringify(name)}, ...methodParams, methodArgs: [] });`,
             "},",
           );
