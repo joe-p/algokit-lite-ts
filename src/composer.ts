@@ -14,6 +14,7 @@ import {
   encodeMethodArgs,
   getAbiMethod,
 } from "./arc56_utils";
+import { populateAppCallResources } from "./resource_population";
 
 const USAGE_SCALE = 1_000_000n;
 export const BASE_USAGE = 1_000_000n;
@@ -226,8 +227,19 @@ export class Composer<TReturns extends unknown[] = []> {
    */
   getSuggestedParams?: () => Promise<SuggestedParams>;
 
-  constructor(opts: { getSuggestedParams?: () => Promise<SuggestedParams> }) {
+  /**
+   * When simulating to determine fees, also add the accounts, apps, assets
+   * and boxes that app calls access without referencing to their reference
+   * arrays. Defaults to true.
+   */
+  populateAppCallResources: boolean;
+
+  constructor(opts: {
+    getSuggestedParams?: () => Promise<SuggestedParams>;
+    populateAppCallResources?: boolean;
+  }) {
     this.getSuggestedParams = opts.getSuggestedParams;
+    this.populateAppCallResources = opts.populateAppCallResources ?? true;
   }
 
   private async getSdkParams(
@@ -456,9 +468,11 @@ export class Composer<TReturns extends unknown[] = []> {
   }
 
   /**
-   * Simulate the group to determine its fees and adjust them accordingly.
-   * Returns the simulate response, with fees left unadjusted, if the group
-   * fails. Throws if a transaction's adjusted fee would exceed its maxUsage.
+   * Simulate the group to determine its fees and adjust them accordingly,
+   * populating app call resources if enabled. Returns the simulate response,
+   * with the group left unadjusted, if the group fails. Throws if a
+   * transaction's adjusted fee would exceed its maxUsage or resources cannot
+   * fit in the group's reference arrays.
    */
   private async simulateForInfo(
     algod: Algodv2,
@@ -517,7 +531,8 @@ export class Composer<TReturns extends unknown[] = []> {
           fixSigners: true,
           extraOpcodeBudget: request?.extraOpcodeBudget,
           allowMoreLogging: request?.allowMoreLogging,
-          allowUnnamedResources: request?.allowUnnamedResources,
+          allowUnnamedResources:
+            this.populateAppCallResources || request?.allowUnnamedResources,
           txnGroups: [
             new algosdk.modelsv2.SimulateRequestTransactionGroup({
               txns: await Promise.all(signedSimTxns),
@@ -550,6 +565,12 @@ export class Composer<TReturns extends unknown[] = []> {
     const adjustedAtc = this.atc.clone();
     const txns = adjustedAtc.buildGroup().map((t) => t.txn);
 
+    // Reference arrays do not affect usage, so the fees determined by this
+    // simulation still hold once resources are added
+    const resourcesPopulated =
+      this.populateAppCallResources &&
+      populateAppCallResources(txns, groupResponse);
+
     // Update staticUsage transactions to their fee at the current min fee. Any
     // fee they already contributed during simulation was based on the
     // suggested params, so account for the difference.
@@ -568,7 +589,11 @@ export class Composer<TReturns extends unknown[] = []> {
     const feeNeeded =
       requiredFees - paid + paidIncludesStaticUsage - staticUsageFees;
     if (feeNeeded <= 0n) {
-      if (paidIncludesStaticUsage > 0n || staticUsageFees > 0n) {
+      if (
+        resourcesPopulated ||
+        paidIncludesStaticUsage > 0n ||
+        staticUsageFees > 0n
+      ) {
         Composer.regroup(txns);
       }
       this.atc = adjustedAtc;
@@ -600,7 +625,8 @@ export class Composer<TReturns extends unknown[] = []> {
 
     for (const [i, txn] of txns.entries()) txn.fee = newFees[i] ?? txn.fee;
 
-    // Fees changed after the group was built, so the group ID must be recomputed
+    // Fees (and possibly resources) changed after the group was built, so the
+    // group ID must be recomputed
     Composer.regroup(txns);
     this.atc = adjustedAtc;
     return {};

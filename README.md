@@ -20,9 +20,6 @@ Additionally, AlgoKit Lite uses some new features of algod to do things in a dif
 
 The general pattern of the composer for both AlgoKit Utils and Lite is more or less the same. The composer takes in transaction parameters and can optionally do some of the mundane work (like setting suggestedParams) under the hood.
 
-> [!WARNING]
-> The Lite composer currently does not do resource population, but this will definitely be added in the near future.
-
 ### extraFee and maxFee
 
 #### Utils
@@ -150,6 +147,17 @@ composer.addPayment({
   receiver,
   amount,
   feePercent: 1, // AlgoKit Lite will use the sender.emptyTxnSigner during simulate to get the fees required for the pqsig
+});
+```
+
+### Resource Population
+
+Like utils, the Lite composer populates app call resources by default. The same simulation that determines fees also reports the accounts, apps, assets and boxes that app calls access without referencing, and the composer adds them to the group's reference arrays. App calls that use an access list are left untouched. To turn it off, construct the composer with `populateAppCallResources: false`:
+
+```ts
+const composer = new Composer({
+  getSuggestedParams,
+  populateAppCallResources: false,
 });
 ```
 
