@@ -8,7 +8,7 @@ const HELP = `
 algoKIT lite: typed client generator
 
 Usage:
-  algokit-lite generate <arc56.json> [options]
+  algokit-lite <arc56.json> [options]
 
 Generates a typed ARC-56 client from an ARC-56 JSON file.
 
