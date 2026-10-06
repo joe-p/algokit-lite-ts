@@ -616,7 +616,12 @@ export class ARC56AppClient {
 
     const { simulateResponse, methodResults } = await composer.simulate(
       this.algod,
-      { skipSignatures: true, allowUnnamedResources: true },
+      {
+        skipSignatures: true,
+        allowUnnamedResources: true,
+        // Thrown below, with the ARC56 error message
+        throwOnFailure: false,
+      },
     );
 
     const failureMessage = simulateResponse.txnGroups[0]?.failureMessage;

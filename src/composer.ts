@@ -31,7 +31,14 @@ export type ComposerSender = AddressWithTransactionSigner & {
 export type ComposerSimulateOptions = Omit<
   ConstructorParameters<typeof algosdk.modelsv2.SimulateRequest>[0],
   "txnGroups"
-> & { skipSignatures?: boolean };
+> & {
+  skipSignatures?: boolean;
+  /**
+   * Throw when the group fails rather than returning the simulate response.
+   * Defaults to true.
+   */
+  throwOnFailure?: boolean;
+};
 
 type TxnInfo = {
   feePercent?: number;
@@ -871,11 +878,13 @@ export class Composer<TReturns extends unknown[] = []> {
     return { group: this.atc.buildGroup(), ...simulated };
   }
 
-  /** Throw the failure of a simulation that was run to determine fees */
+  /** Throw the failure of a simulation, with the response as its cause */
   private static throwSimulationFailure(
     simulateResponse: algosdk.modelsv2.SimulateResponse,
   ): never {
-    throw new Error(simulateResponse.txnGroups[0]?.failureMessage);
+    throw new Error(simulateResponse.txnGroups[0]?.failureMessage, {
+      cause: simulateResponse,
+    });
   }
 
   async buildGroup(algod: Algodv2) {
@@ -968,24 +977,30 @@ export class Composer<TReturns extends unknown[] = []> {
       );
     }
 
+    const {
+      skipSignatures,
+      throwOnFailure = true,
+      ...requestParams
+    } = simRequest ?? {};
     const request = new algosdk.modelsv2.SimulateRequest({
       txnGroups: [],
-      fixSigners: simRequest?.skipSignatures,
-      allowEmptySignatures: simRequest?.skipSignatures,
-      ...simRequest,
+      fixSigners: skipSignatures,
+      allowEmptySignatures: skipSignatures,
+      ...requestParams,
     });
 
     const { failedSimulation } = await this._buildGroup(algod, request);
     // The group failed while determining fees. Simulating it again with
     // unadjusted fees would only fail on fees, so return the original failure.
     if (failedSimulation) {
+      if (throwOnFailure) Composer.throwSimulationFailure(failedSimulation);
       return {
         simulateResponse: failedSimulation,
         methodResults: [] as unknown as MethodResults<TReturns>,
       };
     }
     let simAtc = this.atc;
-    if (simRequest?.skipSignatures) {
+    if (skipSignatures) {
       // Clone to keep the method calls for decoding results, then swap each
       // signer for the sender's empty signer
       simAtc = this.atc.clone();
@@ -1000,6 +1015,12 @@ export class Composer<TReturns extends unknown[] = []> {
     }
 
     const result = await simAtc.simulate(algod, request);
+    if (
+      throwOnFailure &&
+      result.simulateResponse.txnGroups[0]?.failureMessage
+    ) {
+      Composer.throwSimulationFailure(result.simulateResponse);
+    }
 
     return {
       simulateResponse: result.simulateResponse,

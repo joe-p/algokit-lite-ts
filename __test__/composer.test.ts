@@ -348,6 +348,43 @@ describe("Composer ARC56", () => {
     expect(emptySignerCalls).toBe(2);
   });
 
+  it("should throw when simulate fails unless throwOnFailure is false", async () => {
+    const failingCall = () =>
+      localnet.composer().addMethodCall({
+        arc56,
+        appID: appId,
+        method: "foo",
+        sender,
+        methodArgs: [{ add: { a: 1n, b: 2n }, subtract: { a: 1n, b: 100n } }],
+      });
+    // Passes fee simulation, then fails for paying no fee
+    const underpaying = () =>
+      localnet.composer().addPayment({
+        sender,
+        receiver: sender.address,
+        amount: 0n,
+        staticFee: 0n,
+      });
+
+    for (const composer of [failingCall, underpaying]) {
+      const error = await composer()
+        .simulate(localnet.algod)
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(Error);
+      if (!(error instanceof Error)) throw new Error("Expected an error");
+      expect(error.cause).toBeInstanceOf(algosdk.modelsv2.SimulateResponse);
+      const response = error.cause as algosdk.modelsv2.SimulateResponse;
+      expect(error.message).toBe(response.txnGroups[0]?.failureMessage ?? "");
+
+      const result = await composer().simulate(localnet.algod, {
+        throwOnFailure: false,
+      });
+      expect(result.simulateResponse.txnGroups[0]?.failureMessage).toBe(
+        error.message,
+      );
+    }
+  });
+
   it("should use the sender's signer when simulating without skipSignatures", () => {
     const unsignableSender = {
       address: sender.address,

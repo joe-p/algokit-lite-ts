@@ -99,7 +99,9 @@ describe("Composer retries", () => {
         simulateTransactions.mockResolvedValueOnce(failedSimulation());
 
         if (first === "simulate") {
-          const result = await composer.simulate(algod);
+          const result = await composer.simulate(algod, {
+            throwOnFailure: false,
+          });
           expect(result.simulateResponse.txnGroups[0]?.failureMessage).toBe(
             "overspend",
           );

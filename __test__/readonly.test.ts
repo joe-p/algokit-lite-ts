@@ -262,7 +262,7 @@ describe("readonly methods", () => {
 declare const client: ReadonlyClient;
 async function usage() {
   const { returnValue, result } = await client.call.getPoint({
-    sender: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAY5HFKQ",
+    sender: algosdk.Address.zeroAddress(),
     args: { x: 1n },
     staticFee: 2000n,
   });
