@@ -1,4 +1,4 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect } from "vitest";
 import algosdk from "algosdk";
 import { getTypeScriptValue } from "../src/arc56_utils";
 import type { ARC56Contract } from "../src/types/arc56";

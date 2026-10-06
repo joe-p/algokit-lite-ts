@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, spyOn } from "bun:test";
+import { describe, it, expect, beforeAll, vi } from "vitest";
 import algosdk from "algosdk";
 import ts from "typescript";
 import * as path from "path";
@@ -319,7 +319,7 @@ async function usage() {
         return dispenser.txnSigner(...args);
       },
     };
-    const send = spyOn(localnet.algod, "sendRawTransaction");
+    const send = vi.spyOn(localnet.algod, "sendRawTransaction");
     try {
       const { returnValue, result } = await client.call.getPoint({
         sender,
@@ -371,7 +371,7 @@ async function usage() {
       expect((error as Error).message).toContain("n must be positive");
 
       // Executing reports the same error
-      expect(
+      await expect(
         appClient.methodCall({
           method: "mustBePositive",
           sender: dispenser,
@@ -413,7 +413,7 @@ async function usage() {
     expect(txn?.txnResult.txn.txn.fee).toBeGreaterThanOrEqual(2000n);
 
     // Fee overrides still apply
-    expect(
+    await expect(
       appClient.simulateMethodCall({
         method: "callOther",
         sender: dispenser,
@@ -442,15 +442,19 @@ async function usage() {
 });
 
 function typeCheck(code: string): string[] {
-  const filename = path.join(import.meta.dir, "generated", "ReadonlyCheck.ts");
+  const filename = path.join(
+    import.meta.dirname,
+    "generated",
+    "ReadonlyCheck.ts",
+  );
   const config = ts.readConfigFile(
-    `${import.meta.dir}/../tsconfig.json`,
+    `${import.meta.dirname}/../tsconfig.json`,
     (file) => ts.sys.readFile(file),
   );
   const parsed = ts.parseJsonConfigFileContent(
     config.config,
     ts.sys,
-    `${import.meta.dir}/..`,
+    `${import.meta.dirname}/..`,
   );
   const host = ts.createCompilerHost(parsed.options);
   const getSourceFile = host.getSourceFile.bind(host);

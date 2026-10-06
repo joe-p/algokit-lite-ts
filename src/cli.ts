@@ -1,4 +1,3 @@
-#!/usr/bin/env bun
 import * as fs from "fs";
 import * as path from "path";
 import { ARC56Generator } from "./generator";
@@ -94,7 +93,9 @@ function parseArgs(argv: string[]): CliOptions {
 }
 
 async function main(): Promise<void> {
-  const { arc56Path, outputPath, importPath } = parseArgs(Bun.argv.slice(2));
+  const { arc56Path, outputPath, importPath } = parseArgs(
+    process.argv.slice(2),
+  );
 
   const fullPath = path.resolve(arc56Path);
   if (!fs.existsSync(fullPath)) {

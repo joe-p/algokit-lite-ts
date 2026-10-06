@@ -1,6 +1,6 @@
-// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`ARC56Generator should match snapshot for the full generated typed client 1`] = `
+exports[`ARC56Generator > should match snapshot for the full generated typed client 1`] = `
 "/* eslint-disable */
 import algosdk from "algosdk";
 import {
