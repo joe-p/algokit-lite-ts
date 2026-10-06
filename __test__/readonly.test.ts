@@ -281,19 +281,20 @@ describe("readonly methods", () => {
     // The generated client and its return types type check
     const usage = `
 declare const client: ReadonlyClient;
+const sender = { address: algosdk.Address.zeroAddress(), txnSigner: algosdk.makeEmptyTransactionSigner() };
 async function usage() {
   const { returnValue, result } = await client.call.getPoint({
-    sender: algosdk.Address.zeroAddress(),
+    sender,
     args: { x: 1n },
     staticFee: 2000n,
   });
   const point: Point = returnValue;
   const response: algosdk.modelsv2.SimulateResponse = result.simulateResponse;
-  const n: bigint = (await client.call.mustBePositive({ sender: algosdk.Address.zeroAddress(), args: { n: 1n } })).returnValue;
-  const seven: bigint = (await client.call.getSeven({ sender: algosdk.Address.zeroAddress() })).returnValue;
+  const n: bigint = (await client.call.mustBePositive({ sender, args: { n: 1n } })).returnValue;
+  const seven: bigint = (await client.call.getSeven({ sender })).returnValue;
   // @ts-expect-error simulated methods require a sender
   await client.call.getSeven();
-  const round: bigint = (await client.call.write({ sender: { address: algosdk.Address.zeroAddress(), txnSigner: algosdk.makeEmptyTransactionSigner() } })).result.confirmedRound;
+  const round: bigint = (await client.call.write({ sender })).result.confirmedRound;
   // @ts-expect-error execute results are not returned for readonly methods
   result.confirmedRound;
   return [point, response, n, seven, round];
@@ -345,37 +346,13 @@ async function usage() {
     }
   });
 
-  it("works with a sender that has no signer", async () => {
-    const appClient = await create();
-
-    // An Addressable whose address is a prototype getter, so it is not copied by object spread
-    class GetterSender {
-      get address() {
-        return dispenser.address;
-      }
-    }
-
-    for (const sender of [
-      dispenser.address,
-      { address: dispenser.address },
-      new GetterSender(),
-    ]) {
-      const { returnValue } = await appClient.simulateMethodCall({
-        method: "getPoint",
-        sender,
-        methodArgs: [5n],
-      });
-      expect(returnValue).toEqual({ x: 5n, y: 10n });
-    }
-  });
-
   it("throws the ARC56 error message when a readonly method fails an assert", async () => {
     for (const sourceInfo of ["array", "cblocks"] as const) {
       const appClient = await create(sourceInfo);
 
       const { returnValue } = await appClient.simulateMethodCall({
         method: "mustBePositive",
-        sender: dispenser.address,
+        sender: dispenser,
         methodArgs: [3n],
       });
       expect(returnValue).toBe(3n);
@@ -383,7 +360,7 @@ async function usage() {
       const error = await appClient
         .simulateMethodCall({
           method: "mustBePositive",
-          sender: dispenser.address,
+          sender: dispenser,
           methodArgs: [0n],
         })
         .catch((e: unknown) => e as Error);
@@ -409,7 +386,7 @@ async function usage() {
     const error = await appClient
       .simulateMethodCall({
         method: "mustBePositive",
-        sender: dispenser.address,
+        sender: dispenser,
         methodArgs: [0n],
       })
       .catch((e: unknown) => e as Error);
@@ -428,7 +405,7 @@ async function usage() {
     // The app pays its inner call's fee from the outer call's fee
     const { returnValue, result } = await appClient.simulateMethodCall({
       method: "callOther",
-      sender: dispenser.address,
+      sender: dispenser,
       methodArgs: [other.appId],
     });
     expect(returnValue).toBe(14n);
@@ -439,7 +416,7 @@ async function usage() {
     expect(
       appClient.simulateMethodCall({
         method: "callOther",
-        sender: dispenser.address,
+        sender: dispenser,
         methodArgs: [other.appId],
         staticFee: 1000n,
       }),

@@ -108,7 +108,7 @@ export type MethodExecutionResult = {
 };
 
 export type SimulateMethodParams = Omit<AppClientMethodParams, "sender"> & {
-  sender: algosdk.Address | algosdk.Addressable;
+  sender: ComposerSender;
 };
 
 export type MethodSimulationResult = {
@@ -120,21 +120,6 @@ export type MethodSimulateCallResult<TReturn = unknown> = {
   result: MethodSimulationResult;
   returnValue: TReturn;
 };
-
-/** Signs nothing, for senders of simulated calls that have no signer */
-const noSigner: algosdk.TransactionSigner = () => {
-  throw Error("Simulated calls are never signed");
-};
-
-function toSimulateSender(
-  sender: SimulateMethodParams["sender"],
-): ComposerSender {
-  if (sender instanceof algosdk.Address) {
-    return { address: sender, txnSigner: noSigner };
-  }
-  if ("txnSigner" in sender) return sender as ComposerSender;
-  return { ...sender, address: sender.address, txnSigner: noSigner };
-}
 
 export type MethodCallResult<TReturn = unknown> = {
   result: MethodExecutionResult;
@@ -603,7 +588,7 @@ export class ARC56AppClient {
 
   /**
    * Simulate a NoOp method call instead of sending it, as is done for readonly
-   * methods. Nothing is signed, so the sender does not need a signer. Throws if
+   * methods. Nothing is signed, so the sender's signer is never called. Throws if
    * the call fails, with the ARC56 error message when the source info has one.
    */
   async simulateMethodCall<TReturn = unknown>(
@@ -611,7 +596,7 @@ export class ARC56AppClient {
   ): Promise<MethodSimulateCallResult<TReturn>> {
     const { composer, arc56Method } = this.composeMethodCall(
       algosdk.OnApplicationComplete.NoOpOC,
-      { ...params, sender: toSimulateSender(params.sender) },
+      params,
     );
 
     const { simulateResponse, methodResults } = await composer.simulate(
