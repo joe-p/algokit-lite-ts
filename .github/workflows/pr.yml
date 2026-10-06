@@ -19,28 +19,32 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
         with:
-          bun-version: 1.4.2
+          node-version: 24
+          cache: pnpm
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Start LocalNet
-        run: bun run localnet start
+        run: pnpm run localnet start
 
       - name: Lint
-        run: bun run lint
+        run: pnpm run lint
 
       - name: Check formatting
-        run: bun run format
+        run: pnpm run format
 
       - name: Check types
-        run: bun run check-types
+        run: pnpm run check-types
 
       - name: Test
-        run: bun run test
+        run: pnpm run test
 
       - name: Check changelog
         uses: joe-p/semfrag/actions/check@e4ce6e37a786a2d283ce7edbaf235af5aa8d48b7 # v0.9.0

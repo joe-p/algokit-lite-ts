@@ -1,4 +1,4 @@
-import { describe, expect, it, mock } from "bun:test";
+import { describe, expect, it, vi } from "vitest";
 import algosdk from "algosdk";
 import { Composer } from "../src/composer";
 
@@ -15,9 +15,9 @@ function setup() {
     lastValid: 1_000n,
     genesisHash: new Uint8Array(32),
   };
-  const getSuggestedParams = mock(() => Promise.resolve(suggestedParams));
-  const getTransactionParams = mock(() => Promise.resolve(suggestedParams));
-  const simulateTransactions = mock(
+  const getSuggestedParams = vi.fn(() => Promise.resolve(suggestedParams));
+  const getTransactionParams = vi.fn(() => Promise.resolve(suggestedParams));
+  const simulateTransactions = vi.fn(
     (request: algosdk.modelsv2.SimulateRequest) => {
       const txns = request.txnGroups[0]?.txns ?? [];
       return Promise.resolve(
@@ -35,7 +35,7 @@ function setup() {
       );
     },
   );
-  const sendRawTransaction = mock((txns: Uint8Array[]) => {
+  const sendRawTransaction = vi.fn((txns: Uint8Array[]) => {
     const decoded = txns.map((txn) => algosdk.decodeSignedTransaction(txn).txn);
     expect(decoded.every((txn) => txn.fee >= 1_000n)).toBe(true);
     return Promise.resolve({ txId: decoded[0]?.txID() });

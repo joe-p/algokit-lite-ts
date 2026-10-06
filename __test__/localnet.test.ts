@@ -1,4 +1,4 @@
-import { describe, it, expect, spyOn } from "bun:test";
+import { describe, it, expect, vi } from "vitest";
 import { Localnet } from "../src/localnet";
 
 describe("Localnet client configuration", () => {
@@ -20,9 +20,9 @@ describe("Localnet client configuration", () => {
       url: "http://127.0.0.1:9999/v2/accounts",
     },
   ])("should use the $name indexer port", async ({ opts, url }) => {
-    const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValue(
-      Response.json({ accounts: [], "current-round": 0 }),
-    );
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(Response.json({ accounts: [], "current-round": 0 }));
     try {
       await new Localnet(opts).indexer.searchAccounts().do();
 

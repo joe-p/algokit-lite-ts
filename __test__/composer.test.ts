@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "bun:test";
+import { describe, it, expect, beforeAll } from "vitest";
 import algosdk, { type Falcon1024SigningKey } from "algosdk";
 import { Localnet } from "../src/localnet";
 import { ARC56AppClient } from "../src/arc56_client";
@@ -385,7 +385,7 @@ describe("Composer ARC56", () => {
     }
   });
 
-  it("should use the sender's signer when simulating without skipSignatures", () => {
+  it("should use the sender's signer when simulating without skipSignatures", async () => {
     const unsignableSender = {
       address: sender.address,
       // eslint-disable-next-line @typescript-eslint/require-await
@@ -394,7 +394,7 @@ describe("Composer ARC56", () => {
       },
     };
 
-    expect(
+    await expect(
       localnet
         .composer()
         .addPayment({
@@ -406,8 +406,8 @@ describe("Composer ARC56", () => {
     ).rejects.toThrow("signer was called");
   });
 
-  it("should throw when skipSignatures is combined with allowEmptySignatures: false", () => {
-    expect(
+  it("should throw when skipSignatures is combined with allowEmptySignatures: false", async () => {
+    await expect(
       localnet
         .composer()
         .addPayment({ sender, receiver: sender.address, amount: 0n })
@@ -510,10 +510,10 @@ describe("Composer ARC56", () => {
     });
   });
 
-  it("should throw error if method is a string without arc56 attached", () => {
+  it("should throw error if method is a string without arc56 attached", async () => {
     const composer = localnet.composer();
 
-    expect(
+    await expect(
       composer
         // @ts-expect-error method as string without arc56 should be invalid at type and runtime level
         .addMethodCall({
@@ -705,12 +705,12 @@ describe("Composer ARC56", () => {
     expect(fee0).toBeGreaterThan(0n);
   });
 
-  it("should throw error when feePercent values don't sum to 1", () => {
+  it("should throw error when feePercent values don't sum to 1", async () => {
     const composer = new Composer({
       getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
     });
 
-    expect(
+    await expect(
       composer
         .addPayment({
           sender,
@@ -884,12 +884,12 @@ describe("Composer ARC56", () => {
     expect(getTxn(txns, 0).txn.fee).toBe(1_000n);
   });
 
-  it("should throw when a transaction's fee exceeds its maxUsage", () => {
+  it("should throw when a transaction's fee exceeds its maxUsage", async () => {
     const composer = new Composer({
       getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
     });
 
-    expect(
+    await expect(
       composer
         .addPayment({
           sender,
@@ -902,12 +902,12 @@ describe("Composer ARC56", () => {
     ).rejects.toThrow("maxUsage exceeded");
   });
 
-  it("should throw on simulate when a transaction's fee exceeds its maxUsage", () => {
+  it("should throw on simulate when a transaction's fee exceeds its maxUsage", async () => {
     const composer = new Composer({
       getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
     });
 
-    expect(
+    await expect(
       composer
         .addPayment({
           sender,

@@ -1,4 +1,4 @@
-import { describe, it, expect, spyOn } from "bun:test";
+import { describe, it, expect, vi } from "vitest";
 import algosdk from "algosdk";
 import ts from "typescript";
 import { ARC56AppClient } from "../src/arc56_client";
@@ -109,7 +109,7 @@ describe("ABI overloads", () => {
     }
   }
 
-  it("rejects ambiguous names and lists all signatures", () => {
+  it("rejects ambiguous names and lists all signatures", async () => {
     const message =
       "Method bar is ambiguous in Overloads ARC56 definition; use one of: bar(uint64)void, bar(uint64)uint64, bar(string)uint64, bar()uint64";
     expect(() => getAbiMethod(arc56, "bar")).toThrow(message);
@@ -119,7 +119,7 @@ describe("ABI overloads", () => {
     expect(() =>
       decodeMethodReturnValue(arc56, "bar", new Uint8Array()),
     ).toThrow(message);
-    expect(
+    await expect(
       new Composer({
         getSuggestedParams: () => Promise.resolve(suggestedParams),
       })
@@ -133,7 +133,7 @@ describe("ABI overloads", () => {
       signature,
       algosdk.ABIMethod.fromSignature(signature),
     ]) {
-      it(`rejects unmatched ${signature} (${typeof method})`, () => {
+      it(`rejects unmatched ${signature} (${typeof method})`, async () => {
         const message = `Method ${signature} not found`;
         expect(() => getAbiMethod(arc56, method)).toThrow(message);
         expect(() => makeClient().getParams({ method, sender })).toThrow(
@@ -142,7 +142,7 @@ describe("ABI overloads", () => {
         expect(() =>
           makeClient().decodeMethodReturnValue(method, new Uint8Array()),
         ).toThrow(message);
-        expect(
+        await expect(
           new Composer({
             getSuggestedParams: () => Promise.resolve(suggestedParams),
           })
@@ -223,7 +223,7 @@ describe("ABI overloads", () => {
     if (!voidMethod) throw new Error("Expected void method");
     voidMethod.actions = { create: [], call: ["OptIn"] };
     const method = algosdk.ABIMethod.fromSignature("bar(uint64)uint64");
-    const execute = spyOn(Composer.prototype, "execute").mockResolvedValue({
+    const execute = vi.spyOn(Composer.prototype, "execute").mockResolvedValue({
       confirmedRound: 1n,
       txIDs: ["offline"],
       methodResults: [
@@ -246,7 +246,7 @@ describe("ABI overloads", () => {
           expect(result.returnValue).toBe(42n);
         }
       }
-      expect(
+      await expect(
         makeClient(definition).methodCall({
           method: "bar(uint64)void",
           sender,
@@ -282,15 +282,15 @@ describe("ABI overloads", () => {
       }
     }
 
-    const filename = `${import.meta.dir}/OverloadsClient.ts`;
+    const filename = `${import.meta.dirname}/OverloadsClient.ts`;
     const config = ts.readConfigFile(
-      `${import.meta.dir}/../tsconfig.json`,
+      `${import.meta.dirname}/../tsconfig.json`,
       (file) => ts.sys.readFile(file),
     );
     const parsed = ts.parseJsonConfigFileContent(
       config.config,
       ts.sys,
-      `${import.meta.dir}/..`,
+      `${import.meta.dirname}/..`,
     );
     const host = ts.createCompilerHost(parsed.options);
     const getSourceFile = host.getSourceFile.bind(host);

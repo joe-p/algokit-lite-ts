@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "bun:test";
+import { describe, it, expect, beforeAll } from "vitest";
 import algosdk from "algosdk";
 import { Localnet } from "../src/localnet";
 import { ARC56AppClient } from "../src/arc56_client";
@@ -147,7 +147,7 @@ describe("ARC56AppClient", () => {
     });
 
     // subtract.a < subtract.b should trigger contract assertion
-    expect(
+    await expect(
       appClient.methodCall({
         method: "foo",
         sender,
@@ -329,7 +329,7 @@ return`;
     expect(boxMapVal).toEqual({ sum: 3n, difference: 1n });
   });
 
-  it("should validate method names, sender requirements, and template variables", () => {
+  it("should validate method names, sender requirements, and template variables", async () => {
     const appClient = new ARC56AppClient({
       arc56,
       algod: localnet.algod,
@@ -347,7 +347,7 @@ return`;
     ).toThrow("Method nonExistent not found");
 
     // Mismatched template variables count
-    expect(
+    await expect(
       ARC56AppClient.createMethodCall({
         arc56,
         algod: localnet.algod,
@@ -358,7 +358,7 @@ return`;
     ).rejects.toThrow("expected 1 template variables but got 0");
 
     // Unsupported action (foo only supports NoOp for call, so OptIn throws)
-    expect(
+    await expect(
       appClient.optInMethodCall({ method: "foo", sender }),
     ).rejects.toThrow("OptIn is not supported for foo");
   });
@@ -439,7 +439,7 @@ return`;
       templateVariables: { someNumber: 1337n },
     });
 
-    expect(
+    await expect(
       appClient.methodCall({
         method: "foo",
         sender,

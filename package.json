@@ -17,35 +17,39 @@
   },
   "files": [
     "src",
+    "bin",
     "README.md"
   ],
   "bin": {
-    "algokit-lite": "./src/cli.ts"
+    "algokit-lite": "./bin/algokit-lite.js"
   },
   "scripts": {
     "lint": "eslint .",
     "format": "prettier --check .",
-    "check-types": "tsc --noEmit",
-    "check": "bun run lint && bun run format && bun run check-types",
-    "test": "bun test",
-    "cli": "bun src/cli.ts",
+    "check-types": "tsc6 --noEmit",
+    "check": "pnpm run lint && pnpm run format && pnpm run check-types",
+    "test": "vitest run",
+    "cli": "tsx src/cli.ts",
     "localnet": "algokit localnet"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@joe-p/algokit-cli": "^0.1.0",
-    "@types/bun": "^1.4.1",
+    "@types/node": "^24.19.1",
     "eslint": "^10.10.0",
     "prettier": "^3.9.6",
     "semfrag": "^0.9.0",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
-    "typescript-eslint": "^8.69.0"
+    "typescript-eslint": "^8.69.0",
+    "vitest": "^5.0.3"
   },
   "peerDependencies": {
     "algosdk": "^3.7.0"
   },
   "dependencies": {
     "algosdk": "^3.7.0",
+    "tsx": "^4.23.15",
     "tweetnacl": "^1.0.3"
-  }
+  },
+  "packageManager": "pnpm@11.0.6"
 }

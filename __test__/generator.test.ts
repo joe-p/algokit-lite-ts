@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "bun:test";
+import { describe, it, expect, beforeAll } from "vitest";
 import algosdk from "algosdk";
 import * as path from "path";
 import * as fs from "fs";
@@ -292,7 +292,7 @@ describe("ARC56Generator", () => {
     expect(decoded).toEqual({ sum: 30n, difference: 35n });
 
     // 8. Error handling
-    expect(
+    await expect(
       appClient.call.foo({
         sender: dispenser,
         args: {
