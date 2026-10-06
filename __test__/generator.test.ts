@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, vi } from "vitest";
 import algosdk from "algosdk";
 import * as path from "path";
 import * as fs from "fs";
@@ -6,7 +6,76 @@ import { Localnet } from "../src/localnet";
 import { ARC56Generator } from "../src/generator";
 import type { ARC56Contract } from "../src/types/arc56";
 import type { ARC56TestReturnTypes } from "../example/ARC56TestClient";
+import { ARC56TestClient } from "../example/ARC56TestClient";
 import arc56Json from "./fixtures/ARC56Test.arc56.json";
+
+vi.mock("@joe-p/algokit-lite", () => import("../src"));
+
+describe("ARC56Generator local state", () => {
+  it("should generate local getters accepting addresses without a signer", async () => {
+    const generator = new ARC56Generator(arc56Json as unknown as ARC56Contract);
+    const lines = generator.getStateLines();
+    expect(lines).toContain(
+      'localKey: async (address: string | algosdk.Address | algosdk.AddressWithTransactionSigner): Promise<uint64> => { return this.getState.key("localKey", address); },',
+    );
+    expect(lines).toContain(
+      'value: async (address: string | algosdk.Address | algosdk.AddressWithTransactionSigner, key: bytes): Promise<string> => { return this.getState.map.value("localMap", key, address); },',
+    );
+    const exampleCode = await fs.promises.readFile(
+      path.join(__dirname, "../example/ARC56TestClient.ts"),
+      "utf-8",
+    );
+    expect(await generator.generate()).toBe(exampleCode);
+  });
+
+  it.each(["string", "Address", "AddressWithTransactionSigner"] as const)(
+    "should read generated local keys and maps with %s",
+    async (addressType) => {
+      const address = algosdk.generateAccount().addr;
+      const signer = vi.fn<algosdk.TransactionSigner>();
+      const reader =
+        addressType === "string"
+          ? address.toString()
+          : addressType === "Address"
+            ? address
+            : { address, txnSigner: signer };
+      const accountApplicationInformation = vi.fn(() => ({
+        do: () =>
+          Promise.resolve({
+            appLocalState: {
+              keyValue: [
+                {
+                  key: new TextEncoder().encode("localKey"),
+                  value: { type: 2, uint: 1337n, bytes: new Uint8Array() },
+                },
+                {
+                  key: new TextEncoder().encode("pfoo"),
+                  value: {
+                    type: 1,
+                    uint: 0n,
+                    bytes: algosdk.ABIType.from("string").encode("bar"),
+                  },
+                },
+              ],
+            },
+          }),
+      }));
+      const client = new ARC56TestClient({
+        appId: 1n,
+        algod: { accountApplicationInformation } as unknown as algosdk.Algodv2,
+      });
+
+      expect(await client.state.keys.localKey(reader)).toBe(1337n);
+      expect(await client.state.maps.localMap.value(reader, "foo")).toBe("bar");
+      expect(accountApplicationInformation).toHaveBeenCalledTimes(2);
+      expect(accountApplicationInformation).toHaveBeenCalledWith(
+        address.toString(),
+        1n,
+      );
+      expect(signer).not.toHaveBeenCalled();
+    },
+  );
+});
 
 describe("ARC56Generator", () => {
   const localnet = new Localnet();

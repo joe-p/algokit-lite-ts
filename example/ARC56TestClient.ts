@@ -170,7 +170,8 @@ export class ARC56TestClient extends ARC56AppClient {
         return this.getState.key("globalKey");
       },
       localKey: async (
-        address: algosdk.AddressWithTransactionSigner,
+        address:
+          string | algosdk.Address | algosdk.AddressWithTransactionSigner,
       ): Promise<uint64> => {
         return this.getState.key("localKey", address);
       },
@@ -186,7 +187,8 @@ export class ARC56TestClient extends ARC56AppClient {
       },
       localMap: {
         value: async (
-          address: algosdk.AddressWithTransactionSigner,
+          address:
+            string | algosdk.Address | algosdk.AddressWithTransactionSigner,
           key: bytes,
         ): Promise<string> => {
           return this.getState.map.value("localMap", key, address);

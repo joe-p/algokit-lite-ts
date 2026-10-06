@@ -523,7 +523,7 @@ export class ARC56Generator {
           const valType = this.getTypeScriptType(k.valueType);
           if (storageType === "local") {
             lines.push(
-              `${name}: async (address: algosdk.AddressWithTransactionSigner): Promise<${valType}> => { return this.getState.key("${name}", address); },`,
+              `${name}: async (address: string | algosdk.Address | algosdk.AddressWithTransactionSigner): Promise<${valType}> => { return this.getState.key("${name}", address); },`,
             );
           } else {
             lines.push(
@@ -548,7 +548,7 @@ export class ARC56Generator {
           lines.push(`${name}: {`);
           if (storageType === "local") {
             lines.push(
-              `value: async (address: algosdk.AddressWithTransactionSigner, key: ${keyType}): Promise<${valType}> => { return this.getState.map.value("${name}", key, address); },`,
+              `value: async (address: string | algosdk.Address | algosdk.AddressWithTransactionSigner, key: ${keyType}): Promise<${valType}> => { return this.getState.map.value("${name}", key, address); },`,
             );
           } else {
             lines.push(
