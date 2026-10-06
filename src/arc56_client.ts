@@ -133,7 +133,7 @@ function toSimulateSender(
     return { address: sender, txnSigner: noSigner };
   }
   if ("txnSigner" in sender) return sender as ComposerSender;
-  return { ...sender, txnSigner: noSigner };
+  return { ...sender, address: sender.address, txnSigner: noSigner };
 }
 
 export type MethodCallResult<TReturn = unknown> = {

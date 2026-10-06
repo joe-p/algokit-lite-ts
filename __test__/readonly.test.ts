@@ -348,7 +348,18 @@ async function usage() {
   it("works with a sender that has no signer", async () => {
     const appClient = await create();
 
-    for (const sender of [dispenser.address, { address: dispenser.address }]) {
+    // An Addressable whose address is a prototype getter, so it is not copied by object spread
+    class GetterSender {
+      get address() {
+        return dispenser.address;
+      }
+    }
+
+    for (const sender of [
+      dispenser.address,
+      { address: dispenser.address },
+      new GetterSender(),
+    ]) {
       const { returnValue } = await appClient.simulateMethodCall({
         method: "getPoint",
         sender,
