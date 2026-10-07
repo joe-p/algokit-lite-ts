@@ -515,10 +515,9 @@ export class ARC56AppClient {
   }
 
   /** Compose a call of an ARC56 method, checking the OnComplete is allowed */
-  private composeMethodCall(
-    onComplete: algosdk.OnApplicationComplete,
-    params: AppClientMethodParams,
-  ) {
+  private composeMethodCall(params: AppClientMethodParams) {
+    const onComplete =
+      params.onComplete ?? algosdk.OnApplicationComplete.NoOpOC;
     const callOrCreate = this.appId === 0n ? "create" : "call";
 
     const composer = new Composer({
@@ -566,39 +565,15 @@ export class ARC56AppClient {
     return undefined;
   }
 
-  private async callWithOC<TReturn = unknown>(
-    onComplete: algosdk.OnApplicationComplete,
-    params: AppClientMethodParams,
-  ): Promise<MethodCallResult<TReturn>> {
-    const { composer, arc56Method } = this.composeMethodCall(
-      onComplete,
-      params,
-    );
-
-    const result = await this.executeWithErrorParsing(composer);
-
-    return {
-      result,
-      returnValue: this.lastReturnValue(
-        params.method,
-        arc56Method,
-        result.methodResults,
-      ) as TReturn,
-    };
-  }
-
   /**
-   * Simulate a NoOp method call instead of sending it, as is done for readonly
+   * Simulate a method call instead of sending it, as is done for readonly
    * methods. Nothing is signed, so the sender's signer is never called. Throws if
    * the call fails, with the ARC56 error message when the source info has one.
    */
   async simulateMethodCall<TReturn = unknown>(
     params: SimulateMethodParams,
   ): Promise<MethodSimulateCallResult<TReturn>> {
-    const { composer, arc56Method } = this.composeMethodCall(
-      algosdk.OnApplicationComplete.NoOpOC,
-      params,
-    );
+    const { composer, arc56Method } = this.composeMethodCall(params);
 
     const { simulateResponse, methodResults } = await composer.simulate(
       this.algod,
@@ -633,58 +608,25 @@ export class ARC56AppClient {
     };
   }
 
+  /**
+   * Call an ARC56 method. The OnComplete defaults to NoOp, and throws if the
+   * method does not support it.
+   */
   async methodCall<TReturn = unknown>(
     params: AppClientMethodParams,
   ): Promise<MethodCallResult<TReturn>> {
-    return await this.callWithOC<TReturn>(
-      algosdk.OnApplicationComplete.NoOpOC,
-      params,
-    );
-  }
+    const { composer, arc56Method } = this.composeMethodCall(params);
 
-  async optInMethodCall<TReturn = unknown>(
-    params: AppClientMethodParams,
-  ): Promise<MethodCallResult<TReturn>> {
-    return await this.callWithOC<TReturn>(
-      algosdk.OnApplicationComplete.OptInOC,
-      params,
-    );
-  }
+    const result = await this.executeWithErrorParsing(composer);
 
-  async updateMethodCall<TReturn = unknown>(
-    params: AppClientMethodParams,
-  ): Promise<MethodCallResult<TReturn>> {
-    return await this.callWithOC<TReturn>(
-      algosdk.OnApplicationComplete.UpdateApplicationOC,
-      params,
-    );
-  }
-
-  async deleteMethodCall<TReturn = unknown>(
-    params: AppClientMethodParams,
-  ): Promise<MethodCallResult<TReturn>> {
-    return await this.callWithOC<TReturn>(
-      algosdk.OnApplicationComplete.DeleteApplicationOC,
-      params,
-    );
-  }
-
-  async closeOutMethodCall<TReturn = unknown>(
-    params: AppClientMethodParams,
-  ): Promise<MethodCallResult<TReturn>> {
-    return await this.callWithOC<TReturn>(
-      algosdk.OnApplicationComplete.CloseOutOC,
-      params,
-    );
-  }
-
-  async clearStateMethodCall<TReturn = unknown>(
-    params: AppClientMethodParams,
-  ): Promise<MethodCallResult<TReturn>> {
-    return await this.callWithOC<TReturn>(
-      algosdk.OnApplicationComplete.ClearStateOC,
-      params,
-    );
+    return {
+      result,
+      returnValue: this.lastReturnValue(
+        params.method,
+        arc56Method,
+        result.methodResults,
+      ) as TReturn,
+    };
   }
 
   static async createMethodCall<TReturn = unknown>(
@@ -742,10 +684,7 @@ export class ARC56AppClient {
         requiredExtraPages(approvalProgram, clearProgram),
     };
 
-    const result = await tempClient.callWithOC<TReturn>(
-      methodParams.onComplete ?? algosdk.OnApplicationComplete.NoOpOC,
-      callParams,
-    );
+    const result = await tempClient.methodCall<TReturn>(callParams);
 
     const createdAppId =
       result.result.methodResults.at(-1)?.txInfo?.applicationIndex;

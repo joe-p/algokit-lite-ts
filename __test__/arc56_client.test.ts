@@ -298,8 +298,9 @@ return`;
       ),
     );
 
-    await appClient.optInMethodCall({
+    await appClient.methodCall({
       method: "optInToApplication",
+      onComplete: algosdk.OnApplicationComplete.OptInOC,
       sender,
       boxes: [
         { appIndex: 0, name: box1 },
@@ -359,7 +360,11 @@ return`;
 
     // Unsupported action (foo only supports NoOp for call, so OptIn throws)
     await expect(
-      appClient.optInMethodCall({ method: "foo", sender }),
+      appClient.methodCall({
+        method: "foo",
+        sender,
+        onComplete: algosdk.OnApplicationComplete.OptInOC,
+      }),
     ).rejects.toThrow("OptIn is not supported for foo");
   });
 
