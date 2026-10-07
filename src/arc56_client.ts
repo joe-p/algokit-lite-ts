@@ -167,6 +167,8 @@ export class ARC56AppClient {
   readonly appAddress: algosdk.Address;
   arc56: ARC56Contract;
   getSuggestedParams?: () => Promise<SuggestedParams>;
+  /** The approval program being created, while appId is 0 */
+  private createApprovalProgram?: Uint8Array;
 
   constructor(p: ARC56AppClientParams) {
     this.arc56 = p.arc56;
@@ -183,13 +185,46 @@ export class ARC56AppClient {
     this.getSuggestedParams = p.getSuggestedParams;
   }
 
+  /**
+   * The deployed approval program, which errors are mapped with when the
+   * source info uses the "cblocks" pcOffsetMethod. Undefined otherwise, so
+   * algod is only queried when the program is needed.
+   */
+  private async deployedApprovalProgram(): Promise<Uint8Array | undefined> {
+    const sourceInfo = this.arc56.sourceInfo;
+    if (
+      !sourceInfo ||
+      Array.isArray(sourceInfo) ||
+      sourceInfo.approval.pcOffsetMethod !== "cblocks"
+    ) {
+      return undefined;
+    }
+
+    if (this.appId === 0n) return this.createApprovalProgram;
+
+    try {
+      const app = await this.algod.getApplicationByID(this.appId).do();
+      return app.params?.approvalProgram;
+    } catch {
+      return undefined;
+    }
+  }
+
   private async executeWithErrorParsing(composer: Composer<unknown[]>) {
     try {
       return await composer.execute(this.algod);
     } catch (e: unknown) {
       const eMsg = e instanceof Error ? e.message : "";
       const str = eMsg ? `${eMsg} ${JSON.stringify(e)}` : JSON.stringify(e);
-      throw parseLogicError(this.arc56, this.appId, str, e) ?? e;
+      throw (
+        parseLogicError(
+          this.arc56,
+          this.appId,
+          str,
+          e,
+          await this.deployedApprovalProgram(),
+        ) ?? e
+      );
     }
   }
 
@@ -583,6 +618,7 @@ export class ARC56AppClient {
           this.appId,
           failureMessage,
           simulateResponse,
+          await this.deployedApprovalProgram(),
         ) ?? Error(failureMessage, { cause: simulateResponse })
       );
     }
@@ -691,6 +727,7 @@ export class ARC56AppClient {
         "clear",
         methodParams.templateVariables,
       ));
+    tempClient.createApprovalProgram = approvalProgram;
 
     const callParams: AppClientMethodParams = {
       ...methodParams,
@@ -775,6 +812,7 @@ export class ARC56AppClient {
         "clear",
         createParams.templateVariables,
       ));
+    tempClient.createApprovalProgram = approvalProgram;
 
     const composer = new Composer({
       getSuggestedParams:
