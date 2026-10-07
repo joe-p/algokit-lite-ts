@@ -22,8 +22,19 @@ import {
   getTypeScriptValue as utilsGetTypeScriptValue,
   decodeMethodReturnValue as utilsDecodeMethodReturnValue,
   getAbiMethod,
+  getAbiMethodFromDefinition,
   parseLogicError,
 } from "./arc56_utils.ts";
+
+/** The prefix of the log holding an ABI method's return value */
+const RETURN_PREFIX = new Uint8Array([0x15, 0x1f, 0x7c, 0x75]);
+
+/** The max number of app args. ABI args past the 15th are packed in a tuple */
+const MAX_APP_ARGS = 16;
+
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  return a.length === b.length && a.every((byte, i) => byte === b[i]);
+}
 
 /** Bytes of program that fit in a single application program page */
 const APP_PAGE_SIZE = 2048;
@@ -143,6 +154,20 @@ export type BareCreateResult = {
 };
 
 export type MethodReturnValue<T = unknown> = T;
+
+/** A confirmed call of one of the app's ABI methods, decoded */
+export type ParsedMethodCall = {
+  method: algosdk.ABIMethod;
+  arc56Method: Method;
+  /**
+   * The decoded args, in the method's order. Reference args are resolved to
+   * the address or ID they reference. Transaction args are undefined, since
+   * they are other transactions in the group.
+   */
+  args: unknown[];
+  /** The decoded return value, or undefined for void methods */
+  returnValue: unknown;
+};
 
 export interface ARC56AppClientParams {
   arc56: ARC56Contract;
@@ -971,5 +996,114 @@ export class ARC56AppClient {
     rawValue: Uint8Array,
   ): MethodReturnValue<T> {
     return utilsDecodeMethodReturnValue(this.arc56, methodName, rawValue) as T;
+  }
+
+  /**
+   * Decode a confirmed transaction from a block, or an inner transaction from
+   * its apply data, as a call of one of the app's ABI methods. Returns
+   * undefined if it is not a call of this app or its selector does not match
+   * any of the app's methods.
+   */
+  parseTransaction(
+    signed: algosdk.SignedTxnInBlock | algosdk.SignedTxnWithAD,
+  ): ParsedMethodCall | undefined {
+    const { signedTxn, applyData } =
+      signed instanceof algosdk.SignedTxnInBlock ? signed.signedTxn : signed;
+    const { txn } = signedTxn;
+    const appCall = txn.applicationCall;
+    if (!appCall) return undefined;
+
+    // Creation calls have an appIndex of 0, with the created ID in the apply data
+    const appId =
+      appCall.appIndex === 0n ? applyData.applicationID : appCall.appIndex;
+    if (appId !== this.appId) return undefined;
+
+    const selector = appCall.appArgs[0];
+    if (!selector) return undefined;
+
+    const match = this.arc56.methods
+      .map((arc56Method) => ({
+        arc56Method,
+        method: getAbiMethodFromDefinition(this.arc56, arc56Method),
+      }))
+      .find(({ method }) => bytesEqual(method.getSelector(), selector));
+    if (!match) return undefined;
+    const { method, arc56Method } = match;
+
+    // The args encoded in the app args, which are all but the transaction args
+    const encodedArgs = method.args.flatMap((arg, index) => {
+      if (algosdk.abiTypeIsTransaction(arg.type)) return [];
+      const arc56Arg = arc56Method.args[index];
+      if (!arc56Arg) return [];
+      return [{ index, type: arg.type, arc56Arg }];
+    });
+    const encodedType = (type: algosdk.ABIArgumentType): algosdk.ABIType =>
+      algosdk.abiTypeIsReference(type)
+        ? new algosdk.ABIUintType(8)
+        : (type as algosdk.ABIType);
+
+    const encodedValues = appCall.appArgs.slice(1, MAX_APP_ARGS - 1);
+    if (encodedArgs.length > MAX_APP_ARGS - 1) {
+      const tupleTypes = encodedArgs
+        .slice(MAX_APP_ARGS - 2)
+        .map(({ type }) => encodedType(type));
+      const tuple = appCall.appArgs[MAX_APP_ARGS - 1] ?? new Uint8Array();
+      const values = new algosdk.ABITupleType(tupleTypes).decode(tuple);
+      tupleTypes.forEach((type, i) => {
+        const value = values[i];
+        if (value !== undefined) encodedValues.push(type.encode(value));
+      });
+    }
+
+    const args: unknown[] = method.args.map(() => undefined);
+    encodedArgs.forEach(({ index, type, arc56Arg }, i) => {
+      const encoded = encodedValues[i];
+      if (encoded === undefined) return;
+
+      args[index] = algosdk.abiTypeIsReference(type)
+        ? this.resolveReference(
+            type,
+            Number(new algosdk.ABIUintType(8).decode(encoded)),
+            txn.sender,
+            appCall,
+          )
+        : this.getTypeScriptValue(arc56Arg.struct ?? arc56Arg.type, encoded);
+    });
+
+    let returnValue: unknown = undefined;
+    const lastLog = applyData.evalDelta?.logs.at(-1);
+    if (
+      arc56Method.returns.type !== "void" &&
+      lastLog !== undefined &&
+      bytesEqual(lastLog.slice(0, RETURN_PREFIX.length), RETURN_PREFIX)
+    ) {
+      returnValue = this.getTypeScriptValue(
+        arc56Method.returns.struct ?? arc56Method.returns.type,
+        lastLog.slice(RETURN_PREFIX.length),
+      );
+    }
+
+    return { method, arc56Method, args, returnValue };
+  }
+
+  /**
+   * The address or ID referenced by an index into an app call's foreign
+   * arrays. Index 0 of the accounts is the sender and index 0 of the apps is
+   * the called app. Undefined if the index is out of range.
+   */
+  private resolveReference(
+    type: algosdk.ABIReferenceType,
+    index: number,
+    sender: algosdk.Address,
+    appCall: algosdk.ApplicationTransactionFields,
+  ): algosdk.Address | bigint | undefined {
+    switch (type) {
+      case algosdk.ABIReferenceType.account:
+        return index === 0 ? sender : appCall.accounts[index - 1];
+      case algosdk.ABIReferenceType.application:
+        return index === 0 ? this.appId : appCall.foreignApps[index - 1];
+      case algosdk.ABIReferenceType.asset:
+        return appCall.foreignAssets[index];
+    }
   }
 }
