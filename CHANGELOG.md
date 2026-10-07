@@ -1,3 +1,9 @@
+# 0.6.2 - October 7th, 2026
+
+## Fixes
+
+- Generated local-state key and map getters now accept strings and `algosdk.Address` values as well as `AddressWithTransactionSigner`, so reads do not require a signer.
+
 # 0.6.1 - October 7th, 2026
 
 ## Fixes
