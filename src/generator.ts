@@ -341,22 +341,19 @@ export class ARC56Generator {
 
     const ocMap: Record<
       OnCompleteCallAction,
-      { property: string; clientMethod: string }
+      { property: string; onComplete: string }
     > = {
-      NoOp: { property: "call", clientMethod: "methodCall" },
-      OptIn: { property: "optIn", clientMethod: "optInMethodCall" },
-      CloseOut: { property: "closeOut", clientMethod: "closeOutMethodCall" },
-      ClearState: {
-        property: "clearState",
-        clientMethod: "clearStateMethodCall",
-      },
+      NoOp: { property: "call", onComplete: "NoOpOC" },
+      OptIn: { property: "optIn", onComplete: "OptInOC" },
+      CloseOut: { property: "closeOut", onComplete: "CloseOutOC" },
+      ClearState: { property: "clearState", onComplete: "ClearStateOC" },
       UpdateApplication: {
         property: "update",
-        clientMethod: "updateMethodCall",
+        onComplete: "UpdateApplicationOC",
       },
       DeleteApplication: {
         property: "delete",
-        clientMethod: "deleteMethodCall",
+        onComplete: "DeleteApplicationOC",
       },
     };
 
@@ -371,7 +368,7 @@ export class ARC56Generator {
 
     for (const oc of ocs) {
       const entry = ocMap[oc];
-      const { property, clientMethod } = entry;
+      const { property, onComplete } = entry;
       const methods = this.arc56.methods.filter((m) =>
         m.actions.call.includes(oc),
       );
@@ -392,14 +389,16 @@ export class ARC56Generator {
         const resultType = simulated
           ? "MethodSimulationResult"
           : "MethodExecutionResult";
-        const callMethod = simulated ? "simulateMethodCall" : clientMethod;
+        const callMethod = simulated ? "simulateMethodCall" : "methodCall";
+        // Always set explicitly so methodParams can't override the action
+        const onCompleteStr = `, onComplete: algosdk.OnApplicationComplete.${onComplete}`;
 
         if (m.args.length === 0) {
           // Simulate params require a sender, so they can't default to {}
           const paramsDefault = simulated ? "" : " = {}";
           lines.push(
             `${property}: async (methodParams: ${paramsType}${paramsDefault}): Promise<{ result: ${resultType}; returnValue: ${retType} }> => {`,
-            `  return this.${callMethod}({ method: ${JSON.stringify(name)}, ...methodParams, methodArgs: [] });`,
+            `  return this.${callMethod}({ method: ${JSON.stringify(name)}, ...methodParams, methodArgs: []${onCompleteStr} });`,
             "},",
           );
         } else {
@@ -410,7 +409,7 @@ export class ARC56Generator {
 
           lines.push(
             `${property}: async (methodParams: ${paramsType}<${argsType}>): Promise<{ result: ${resultType}; returnValue: ${retType} }> => {`,
-            `  return this.${callMethod}({ method: ${JSON.stringify(name)}, ...methodParams, methodArgs: [${methodArgsStr}] });`,
+            `  return this.${callMethod}({ method: ${JSON.stringify(name)}, ...methodParams, methodArgs: [${methodArgsStr}]${onCompleteStr} });`,
             "},",
           );
         }

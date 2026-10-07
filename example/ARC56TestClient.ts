@@ -110,6 +110,7 @@ export class ARC56TestClient extends ARC56AppClient {
         method: "foo",
         ...methodParams,
         methodArgs: [methodParams.args.inputs],
+        onComplete: algosdk.OnApplicationComplete.NoOpOC,
       });
     },
   };
@@ -120,10 +121,11 @@ export class ARC56TestClient extends ARC56AppClient {
       result: MethodExecutionResult;
       returnValue: ARC56TestReturnTypes["optInToApplication"];
     }> => {
-      return this.optInMethodCall({
+      return this.methodCall({
         method: "optInToApplication",
         ...methodParams,
         methodArgs: [],
+        onComplete: algosdk.OnApplicationComplete.OptInOC,
       });
     },
   };
