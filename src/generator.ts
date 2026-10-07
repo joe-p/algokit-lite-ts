@@ -390,11 +390,8 @@ export class ARC56Generator {
           ? "MethodSimulationResult"
           : "MethodExecutionResult";
         const callMethod = simulated ? "simulateMethodCall" : "methodCall";
-        // NoOp is the default, so it is left out
-        const onCompleteStr =
-          oc === "NoOp"
-            ? ""
-            : `, onComplete: algosdk.OnApplicationComplete.${onComplete}`;
+        // Always set explicitly so methodParams can't override the action
+        const onCompleteStr = `, onComplete: algosdk.OnApplicationComplete.${onComplete}`;
 
         if (m.args.length === 0) {
           // Simulate params require a sender, so they can't default to {}

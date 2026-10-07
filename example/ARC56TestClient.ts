@@ -110,6 +110,7 @@ export class ARC56TestClient extends ARC56AppClient {
         method: "foo",
         ...methodParams,
         methodArgs: [methodParams.args.inputs],
+        onComplete: algosdk.OnApplicationComplete.NoOpOC,
       });
     },
   };
