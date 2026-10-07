@@ -58,6 +58,18 @@ export class ARC56Generator {
       return `Uint8Array${outerDimensions.replace(/\[\d+\]/g, "[]")}`;
     }
 
+    const array = type.match(/^(.*)\[\d*\]$/);
+    if (array) {
+      return `${this.getTypeScriptType(array[1] ?? "")}[]`;
+    }
+
+    if (type.startsWith("(") && type.endsWith(")")) {
+      const tuple = algosdk.ABIType.from(type) as algosdk.ABITupleType;
+      return `[${tuple.childTypes
+        .map((child) => this.getTypeScriptType(child.toString()))
+        .join(", ")}]`;
+    }
+
     const lastPart = type.split(".").at(-1) ?? "";
     return lastPart
       .replace(/\[\d+\]/g, "[]")
@@ -196,7 +208,9 @@ export class ARC56Generator {
     abiTypes.forEach((t) => {
       if (t.match(/^uint/) || t.match(/^ufixed/)) {
         typeMap.push({ abiType: t, tsType: "bigint" });
-      } else if (t === "bytes" || t === "byte") {
+      } else if (t === "byte") {
+        typeMap.push({ abiType: t, tsType: "number" });
+      } else if (t === "bytes") {
         typeMap.push({ abiType: t, tsType: "string" });
       } else if (t === "AVMBytes") {
         typeMap.push({ abiType: t, tsType: "Uint8Array | string" });

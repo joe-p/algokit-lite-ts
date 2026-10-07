@@ -207,6 +207,33 @@ export function getObjectFromStructFieldsAndArray(
   return obj;
 }
 
+function normalizeDecodedABIValue(
+  type: algosdk.ABIType,
+  value: algosdk.ABIValue,
+): algosdk.ABIValue {
+  if (!Array.isArray(value)) return value;
+
+  if (
+    type instanceof algosdk.ABIArrayStaticType ||
+    type instanceof algosdk.ABIArrayDynamicType
+  ) {
+    if (type.childType instanceof algosdk.ABIByteType) {
+      return new Uint8Array(value as number[]);
+    }
+    return value.map((child) =>
+      normalizeDecodedABIValue(type.childType, child),
+    );
+  }
+
+  if (type instanceof algosdk.ABITupleType) {
+    return type.childTypes.map((childType, i) =>
+      normalizeDecodedABIValue(childType, value[i] as algosdk.ABIValue),
+    );
+  }
+
+  return value;
+}
+
 export function getTypeScriptValue(
   arc56: ARC56Contract,
   type: string,
@@ -222,8 +249,8 @@ export function getTypeScriptValue(
     return algosdk.decodeUint64(value, "bigint");
   }
 
-  const abiType = getABIType(arc56, type);
-  const abiValue = algosdk.ABIType.from(abiType).decode(value);
+  const abiType = algosdk.ABIType.from(getABIType(arc56, type));
+  const abiValue = normalizeDecodedABIValue(abiType, abiType.decode(value));
 
   if (arc56.structs && arc56.structs[type]) {
     return getObjectFromStructFieldsAndArray(
