@@ -1,3 +1,9 @@
+# 0.6.1 - October 7th, 2026
+
+## Fixes
+
+- Generated clients now type `axfer`, `afrz`, `keyreg`, `appl`, `acfg`, and `txn` arguments as `algosdk.TransactionWithSigner`, matching what the composer accepts. Payment arguments continue to accept either `PaymentParams` or `algosdk.TransactionWithSigner`.
+
 # 0.6.0 - October 7th, 2026
 
 ## Features
