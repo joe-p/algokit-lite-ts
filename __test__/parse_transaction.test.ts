@@ -51,7 +51,11 @@ const suggestedParams: algosdk.SuggestedParams = {
 function txnInBlock(
   methodName: string,
   methodArgs: algosdk.ABIArgument[],
-  opts: { appID?: bigint; logs?: Uint8Array[] } = {},
+  opts: {
+    appID?: bigint;
+    logs?: Uint8Array[];
+    onComplete?: algosdk.OnApplicationComplete;
+  } = {},
 ): algosdk.SignedTxnInBlock {
   const def = syntheticArc56.methods.find((m) => m.name === methodName);
   if (!def) throw Error(`Unknown method ${methodName}`);
@@ -61,6 +65,7 @@ function txnInBlock(
     appID: opts.appID ?? appId,
     method: new algosdk.ABIMethod(def),
     methodArgs,
+    onComplete: opts.onComplete,
     sender,
     suggestedParams,
     signer: algosdk.makeEmptyTransactionSigner(),
@@ -157,6 +162,16 @@ describe("ARC56AppClient.parseTransaction", () => {
       client.parseTransaction(
         txnInBlock("refs", [sender, other, 1n, 2n], {
           appID: appId + 1n,
+        }),
+      ),
+    ).toBeUndefined();
+  });
+
+  it("returns undefined for a ClearState call with a matching selector", () => {
+    expect(
+      client.parseTransaction(
+        txnInBlock("refs", [sender, other, 1n, 2n], {
+          onComplete: algosdk.OnApplicationComplete.ClearStateOC,
         }),
       ),
     ).toBeUndefined();

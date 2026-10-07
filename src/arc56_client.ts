@@ -1001,8 +1001,9 @@ export class ARC56AppClient {
   /**
    * Decode a confirmed transaction from a block, or an inner transaction from
    * its apply data, as a call of one of the app's ABI methods. Returns
-   * undefined if it is not a call of this app or its selector does not match
-   * any of the app's methods.
+   * undefined if it is not a call of this app, it is a ClearState call (which
+   * ARC-4 excludes from method invocation), or its selector does not match any
+   * of the app's methods.
    */
   parseTransaction(
     signed: algosdk.SignedTxnInBlock | algosdk.SignedTxnWithAD,
@@ -1012,6 +1013,12 @@ export class ARC56AppClient {
     const { txn } = signedTxn;
     const appCall = txn.applicationCall;
     if (!appCall) return undefined;
+
+    // ARC-4 excludes ClearState from method invocation: its args are arbitrary
+    // and it is confirmed even if the clear state program fails
+    if (appCall.onComplete === algosdk.OnApplicationComplete.ClearStateOC) {
+      return undefined;
+    }
 
     // Creation calls have an appIndex of 0, with the created ID in the apply data
     const appId =
