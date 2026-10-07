@@ -173,11 +173,11 @@ describe("readonly methods", () => {
         ? {
             sourceInfo: {
               approval: {
-                // pcs leave out the intcblock (5 bytes) and bytecblock (7
-                // bytes) that follow the version byte
+                // pcs count from the first op after the version byte, the
+                // intcblock (5 bytes) and the bytecblock (7 bytes)
                 pcOffsetMethod: "cblocks",
                 sourceInfo: [
-                  { pc: [assertPc - 12], errorMessage: "n must be positive" },
+                  { pc: [assertPc - 13], errorMessage: "n must be positive" },
                 ],
               },
               clear: { pcOffsetMethod: "none", sourceInfo: [] },

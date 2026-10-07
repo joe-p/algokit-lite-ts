@@ -331,49 +331,90 @@ export function getAbiMethodFromDefinition(
   }
 }
 
+/** Read a uvarint, returning its value and the index of the byte after it */
+function readUvarint(program: Uint8Array, index: number): [number, number] {
+  let value = 0;
+  let shift = 0;
+  for (;;) {
+    const byte = program[index++];
+    if (byte === undefined) throw Error("Unexpected end of program");
+    value += (byte & 0x7f) * 2 ** shift;
+    if ((byte & 0x80) === 0) return [value, index];
+    shift += 7;
+  }
+}
+
 /**
- * The size of the constant blocks at the start of a program. Programs whose
- * source info uses the "cblocks" pcOffsetMethod record pcs relative to the end
- * of these blocks.
+ * The pc of the first op after the constant blocks at the start of a program,
+ * which the pcs of "cblocks" source info are relative to (see parseLogicError).
  */
-function getConstantBlockOffset(program: Uint8Array): number {
-  const BYTE_CBLOCK = 38;
-  const INT_CBLOCK = 32;
-  const bytes = [...program];
-  const programSize = bytes.length;
-  bytes.shift(); // remove version
+export function getConstantBlockOffset(program: Uint8Array): number {
+  const BYTE_CBLOCK = 0x26;
+  const INT_CBLOCK = 0x20;
 
-  let bytecblockOffset: number | undefined;
-  let intcblockOffset: number | undefined;
+  // The version is a uvarint
+  let [, pc] = readUvarint(program, 0);
 
-  while (bytes.length > 0) {
-    const byte = bytes.shift();
-    if (byte === undefined) break;
-    if (byte === BYTE_CBLOCK || byte === INT_CBLOCK) {
-      const isBytecblock = byte === BYTE_CBLOCK;
-      const valuesRemaining = bytes.shift() ?? 0;
-      for (let i = 0; i < valuesRemaining; i++) {
-        if (isBytecblock) {
-          const length = bytes.shift() ?? 0;
-          bytes.splice(0, length);
-        } else {
-          while (((bytes.shift() ?? 0) & 0x80) !== 0) {
-            // intcblock is a uvarint
-          }
-        }
+  while (program[pc] === BYTE_CBLOCK || program[pc] === INT_CBLOCK) {
+    const isBytecblock = program[pc] === BYTE_CBLOCK;
+    let count: number;
+    [count, pc] = readUvarint(program, pc + 1);
+    for (let i = 0; i < count; i++) {
+      if (isBytecblock) {
+        // A uvarint length followed by that many bytes
+        let length: number;
+        [length, pc] = readUvarint(program, pc);
+        pc += length;
+      } else {
+        [, pc] = readUvarint(program, pc);
       }
-      if (isBytecblock) bytecblockOffset = programSize - bytes.length - 1;
-      else intcblockOffset = programSize - bytes.length - 1;
-
-      if (bytes[0] !== BYTE_CBLOCK && bytes[0] !== INT_CBLOCK) {
-        break;
-      }
-    } else {
-      break;
     }
   }
 
-  return Math.max(bytecblockOffset ?? 0, intcblockOffset ?? 0);
+  return pc;
+}
+
+/**
+ * Whether an approval program was compiled by TEALScript, which starts every
+ * approval program (after the constant blocks) with this routing prelude:
+ *
+ *   txn ApplicationID
+ *   !
+ *   int 6
+ *   *
+ *   txn OnCompletion
+ *   +
+ *   switch ...
+ *
+ * `int 6` becomes `pushint 6`, or `intc` when 6 is in the intcblock.
+ *
+ * @param firstOpPc - The pc of the first op after the constant blocks
+ */
+function isTEALScriptProgram(program: Uint8Array, firstOpPc: number): boolean {
+  let pc = firstOpPc;
+  const match = (...bytes: number[]) => {
+    if (!bytes.every((b, i) => program[pc + i] === b)) return false;
+    pc += bytes.length;
+    return true;
+  };
+
+  return (
+    match(0x31, 0x18, 0x14) && // txn ApplicationID, !
+    (match(0x81, 0x06) || // pushint 6
+      match(0x22) || // intc_0
+      match(0x23) || // intc_1
+      match(0x24) || // intc_2
+      match(0x25) || // intc_3
+      match(0x21, program[pc + 1] ?? -1)) && // intc n
+    match(0x0b, 0x31, 0x19, 0x08, 0x8d) // *, txn OnCompletion, +, switch
+  );
+}
+
+/** The ARC56 approval byteCode, if it is the deployed program (no template variables) */
+function deployedByteCode(arc56: ARC56Contract): Uint8Array | undefined {
+  if (Object.keys(arc56.templateVariables ?? {}).length > 0) return undefined;
+  if (!arc56.byteCode?.approval) return undefined;
+  return algosdk.base64ToBytes(arc56.byteCode.approval);
 }
 
 /**
@@ -383,12 +424,17 @@ function getConstantBlockOffset(program: Uint8Array): number {
  *
  * @param appId - The app the contract is deployed as, or 0 when creating it
  * @param message - The text of the error, which includes the pc and app id
+ * @param approvalProgram - The deployed approval program. Needed for the
+ * "cblocks" pcOffsetMethod when the contract has template variables, because
+ * the ARC56 byteCode is then a placeholder whose constant blocks can differ in
+ * length from the deployed ones.
  */
 export function parseLogicError(
   arc56: ARC56Contract,
   appId: bigint,
   message: string,
   cause?: unknown,
+  approvalProgram?: Uint8Array,
 ): Error | undefined {
   const txId =
     message.match(/(?:transaction\s+)(\S+?)(?=:|\s)/)?.[1] ??
@@ -416,10 +462,20 @@ export function parseLogicError(
   } else {
     const approvalInfo = arc56.sourceInfo.approval;
     let targetPc = pc;
-    if (approvalInfo.pcOffsetMethod === "cblocks" && arc56.byteCode?.approval) {
-      targetPc =
-        pc -
-        getConstantBlockOffset(algosdk.base64ToBytes(arc56.byteCode.approval));
+    if (approvalInfo.pcOffsetMethod === "cblocks") {
+      const program = approvalProgram ?? deployedByteCode(arc56);
+      // Without the deployed program the offset is unknown, and guessing it
+      // could map the error to the message of another op
+      if (!program) return undefined;
+      // ARC56 is ambiguous about the base of "cblocks" pcs. puya (and the
+      // pcOffsetMethod description) count from the first op after the
+      // constant blocks, but TEALScript counts from the last byte of the
+      // constant blocks, one before it.
+      const firstOpPc = getConstantBlockOffset(program);
+      const base = isTEALScriptProgram(program, firstOpPc)
+        ? firstOpPc - 1
+        : firstOpPc;
+      targetPc = pc - base;
     }
     errorMessage = approvalInfo.sourceInfo.find((s) =>
       s.pc.includes(targetPc),
