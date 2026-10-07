@@ -1042,8 +1042,13 @@ export class ARC56AppClient {
         ? new algosdk.ABIUintType(8)
         : (type as algosdk.ABIType);
 
-    const encodedValues = appCall.appArgs.slice(1, MAX_APP_ARGS - 1);
-    if (encodedArgs.length > MAX_APP_ARGS - 1) {
+    // The last app arg is a tuple only when the args don't fit in the others
+    const packed = encodedArgs.length > MAX_APP_ARGS - 1;
+    const encodedValues = appCall.appArgs.slice(
+      1,
+      packed ? MAX_APP_ARGS - 1 : MAX_APP_ARGS,
+    );
+    if (packed) {
       const tupleTypes = encodedArgs
         .slice(MAX_APP_ARGS - 2)
         .map(({ type }) => encodedType(type));

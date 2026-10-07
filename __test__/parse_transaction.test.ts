@@ -22,14 +22,15 @@ function arc56Method(
   } as unknown as Method;
 }
 
-const manyArgs = Array.from({ length: 17 }, () => "uint64");
+const uint64Args = (length: number) => Array.from({ length }, () => "uint64");
 
 const syntheticArc56 = {
   ...(arc56Json as unknown as ARC56Contract),
   methods: [
     arc56Method("refs", ["account", "account", "application", "asset"]),
     arc56Method("withTxn", ["pay", "uint64"], "uint64"),
-    arc56Method("many", manyArgs),
+    arc56Method("fifteen", uint64Args(15)),
+    arc56Method("many", uint64Args(17)),
   ],
 };
 
@@ -124,8 +125,15 @@ describe("ARC56AppClient.parseTransaction", () => {
     expect(parsed?.returnValue).toBe(99n);
   });
 
+  it("decodes exactly 15 args, which are not packed in a tuple", () => {
+    const values = Array.from({ length: 15 }, (_, i) => BigInt(i));
+    const parsed = client.parseTransaction(txnInBlock("fifteen", values));
+
+    expect(parsed?.args).toEqual(values);
+  });
+
   it("decodes args packed in a tuple past the 15th app arg", () => {
-    const values = manyArgs.map((_, i) => BigInt(i));
+    const values = Array.from({ length: 17 }, (_, i) => BigInt(i));
     const parsed = client.parseTransaction(txnInBlock("many", values));
 
     expect(parsed?.args).toEqual(values);
