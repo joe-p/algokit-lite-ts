@@ -1,3 +1,9 @@
+# 0.5.2 - October 7th, 2026
+
+## Fixes
+
+- Correct CLI help usage to show `algokit-lite <arc56.json> [options]`, matching the supported command.
+
 # 0.5.1 - October 6th, 2026
 
 ## Fixes
