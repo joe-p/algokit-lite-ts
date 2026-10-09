@@ -10,11 +10,10 @@
     "check": "pnpm run lint && pnpm run format && pnpm run check-types",
     "test": "vitest run",
     "cli": "tsx packages/generator/src/cli.ts",
-    "localnet": "algokit localnet"
+    "localnet": "go run github.com/joe-p/algokit-cli-go/cmd/algokit@v0.1.0 localnet"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@joe-p/algokit-cli": "^0.1.0",
     "@types/node": "^24.19.1",
     "algosdk": "^3.7.0",
     "eslint": "^10.10.0",
