@@ -13,59 +13,41 @@ permissions:
   contents: write
   id-token: write
 
+# Each package releases independently. The jobs run one at a time, because each
+# pushes a release commit to main, and in dependency order, so a package is
+# packed against the released versions of the packages it depends on.
 jobs:
-  release:
-    runs-on: ubuntu-latest
-    steps:
-      # Check out the branch tip rather than the pushed commit, so a queued run
-      # releases everything that has landed on main since.
-      - name: Check out
-        uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
+  composer:
+    uses: ./.github/workflows/release-package.yml
+    with:
+      package: composer
+      tag-prefix: algokit-lite-composer-v
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+  app-client:
+    needs: composer
+    uses: ./.github/workflows/release-package.yml
+    with:
+      package: app-client
+      tag-prefix: algokit-lite-app-client-v
 
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          registry-url: https://registry.npmjs.org
-          cache: pnpm
+  localnet:
+    needs: app-client
+    uses: ./.github/workflows/release-package.yml
+    with:
+      package: localnet
+      tag-prefix: algokit-lite-localnet-v
 
-      - name: Update npm
-        run: npm install -g npm@latest
+  generator:
+    needs: localnet
+    uses: ./.github/workflows/release-package.yml
+    with:
+      package: generator
+      tag-prefix: algokit-lite-generator-v
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Prepare release
-        id: semfrag
-        uses: joe-p/semfrag/actions/prepare@e4ce6e37a786a2d283ce7edbaf235af5aa8d48b7 # v0.9.0
-
-      - name: Bump package.json version
-        if: steps.semfrag.outputs.released == 'true'
-        env:
-          VERSION: ${{ steps.semfrag.outputs.version }}
-        run: npm pkg set "version=${VERSION}"
-
-      - name: Commit, tag and create GitHub release
-        if: steps.semfrag.outputs.released == 'true'
-        uses: joe-p/semfrag/actions/publish@e4ce6e37a786a2d283ce7edbaf235af5aa8d48b7 # v0.9.0
-
-      - name: Publish to npm
-        if: steps.semfrag.outputs.released == 'true'
-        env:
-          VERSION: ${{ steps.semfrag.outputs.version }}
-        run: |
-          if npm view "@joe-p/algokit-lite@${VERSION}" version >/dev/null 2>&1; then
-            echo "@joe-p/algokit-lite@${VERSION} is already published."
-          else
-            npm publish --access public
-          fi
-
-      - name: Roll back failed release
-        if: failure() || cancelled()
-        uses: joe-p/semfrag/actions/rollback@e4ce6e37a786a2d283ce7edbaf235af5aa8d48b7 # v0.9.0
+  algokit-lite:
+    needs: generator
+    uses: ./.github/workflows/release-package.yml
+    with:
+      package: algokit-lite
+      # Matches the tags released before the split into packages
+      tag-prefix: v

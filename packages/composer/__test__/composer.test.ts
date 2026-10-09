@@ -1,0 +1,1301 @@
+import { describe, it, expect, beforeAll } from "vitest";
+import algosdk, { type Falcon1024SigningKey } from "algosdk";
+import { Localnet } from "@joe-p/algokit-lite-localnet";
+import { ARC56AppClient } from "@joe-p/algokit-lite-app-client";
+import { Composer, type MethodResult } from "../src/composer";
+import type { ARC56Contract } from "../src/types/arc56";
+import arc56Json from "../../../fixtures/ARC56Test.arc56.json";
+
+function getResult(
+  res: { methodResults: MethodResult[] },
+  index: number,
+): MethodResult {
+  const mr = res.methodResults[index];
+  if (!mr) throw new Error(`Expected method result at index ${index}`);
+  return mr;
+}
+
+function getTxn(
+  txns: algosdk.TransactionWithSigner[],
+  index: number,
+): algosdk.TransactionWithSigner {
+  const t = txns[index];
+  if (!t) throw new Error(`Expected transaction at index ${index}`);
+  return t;
+}
+
+describe("Composer ARC56", () => {
+  const localnet = new Localnet();
+  const arc56 = arc56Json as unknown as ARC56Contract;
+  let sender: algosdk.AddressWithTransactionSigner;
+  let appId: bigint;
+
+  beforeAll(async () => {
+    sender = await localnet.dispenser();
+    const created = await ARC56AppClient.createMethodCall({
+      arc56,
+      algod: localnet.algod,
+      method: "createApplication",
+      sender,
+      templateVariables: { someNumber: 1337n },
+    });
+    appId = created.appId;
+    await localnet
+      .composer()
+      .addPayment({
+        sender,
+        receiver: created.appAddress,
+        amount: 1_000_000n,
+      })
+      .execute(localnet.algod);
+  });
+
+  it("should execute method call with attached ARC56 contract and decode return struct", async () => {
+    const composer = localnet.composer();
+    const inputs = { add: { a: 1n, b: 2n }, subtract: { a: 10n, b: 5n } };
+
+    composer.addMethodCall({
+      arc56,
+      appID: appId,
+      method: "foo",
+      sender,
+      methodArgs: [inputs],
+    });
+
+    const result = await composer.execute(localnet.algod);
+    expect(result.methodResults.length).toBe(1);
+    const r = getResult(result, 0);
+    expect(r.returnValue).toEqual({
+      sum: 3n,
+      difference: 5n,
+    });
+    expect(r.rawReturnValue.length).toBeGreaterThan(0);
+    expect(r.decodeError).toBeUndefined();
+  });
+
+  it("should require appID for method call", async () => {
+    const composer = localnet.composer();
+    const inputs = { add: { a: 100n, b: 200n }, subtract: { a: 50n, b: 20n } };
+
+    composer.addMethodCall({
+      arc56,
+      appID: appId,
+      method: "foo",
+      sender,
+      methodArgs: [inputs],
+    });
+
+    const result = await composer.execute(localnet.algod);
+    expect(result.methodResults.length).toBe(1);
+    const r = getResult(result, 0);
+    expect(r.returnValue).toEqual({
+      sum: 300n,
+      difference: 30n,
+    });
+  });
+
+  it("should support ABIMethod instance with attached ARC56 contract", async () => {
+    const composer = localnet.composer();
+    const contract = new algosdk.ABIContract({
+      name: arc56.name,
+      methods: arc56.methods,
+    });
+    const abiMethod = contract.getMethodByName("foo");
+    const inputs = { add: { a: 7n, b: 3n }, subtract: { a: 9n, b: 4n } };
+
+    composer.addMethodCall({
+      arc56,
+      appID: appId,
+      method: abiMethod,
+      sender,
+      methodArgs: [inputs],
+    });
+
+    const result = await composer.execute(localnet.algod);
+    expect(result.methodResults.length).toBe(1);
+    const r = getResult(result, 0);
+    expect(r.returnValue).toEqual({
+      sum: 10n,
+      difference: 5n,
+    });
+  });
+
+  it("should decode multiple ARC56 method calls in a single atomic transaction group", async () => {
+    const composer = localnet.composer();
+    const inputs1 = { add: { a: 10n, b: 20n }, subtract: { a: 30n, b: 15n } };
+    const inputs2 = { add: { a: 50n, b: 50n }, subtract: { a: 80n, b: 20n } };
+
+    composer
+      .addMethodCall({
+        arc56,
+        appID: appId,
+        method: "foo",
+        sender,
+        methodArgs: [inputs1],
+      })
+      .addMethodCall({
+        arc56,
+        appID: appId,
+        method: "foo",
+        sender,
+        methodArgs: [inputs2],
+      });
+
+    const result = await composer.execute(localnet.algod);
+    expect(result.methodResults.length).toBe(2);
+    const r1 = getResult(result, 0);
+    const r2 = getResult(result, 1);
+    expect(r1.returnValue).toEqual({
+      sum: 30n,
+      difference: 15n,
+    });
+    expect(r2.returnValue).toEqual({
+      sum: 100n,
+      difference: 60n,
+    });
+  });
+
+  it("should support composing payment transaction and ARC56 method call together", async () => {
+    const receiver = await localnet.generateAccount({});
+    const composer = localnet.composer();
+    const inputs = { add: { a: 4n, b: 6n }, subtract: { a: 12n, b: 2n } };
+
+    composer
+      .addPayment({
+        sender,
+        receiver: receiver.address,
+        amount: 200_000n,
+      })
+      .addMethodCall({
+        arc56,
+        appID: appId,
+        method: "foo",
+        sender,
+        methodArgs: [inputs],
+      });
+
+    const result = await composer.execute(localnet.algod);
+    expect(result.methodResults.length).toBe(1);
+    const r = getResult(result, 0);
+    expect(r.returnValue).toEqual({
+      sum: 10n,
+      difference: 10n,
+    });
+  });
+
+  it("should build a payment transaction from PaymentParams passed as a pay method argument", async () => {
+    const arc56WithPay: ARC56Contract = {
+      ...arc56,
+      methods: [
+        ...arc56.methods,
+        {
+          name: "deposit",
+          args: [{ name: "payment", type: "pay" }],
+          returns: { type: "void" },
+          actions: { create: [], call: ["NoOp"] },
+        },
+      ],
+    };
+
+    const composer = localnet.composer();
+    composer.addMethodCall({
+      arc56: arc56WithPay,
+      appID: appId,
+      method: "deposit",
+      sender,
+      methodArgs: [{ sender, receiver: sender.address, amount: 1_000_000n }],
+    });
+
+    const txns = await composer.buildGroupOffline();
+    expect(txns.length).toBe(2);
+
+    // The payment txn is added before the application call txn
+    const payTxn = getTxn(txns, 0);
+    if (!payTxn.txn.payment) throw new Error("Expected payment transaction");
+    expect(payTxn.txn.payment.amount).toBe(1_000_000n);
+    expect(payTxn.txn.payment.receiver.toString()).toBe(
+      sender.address.toString(),
+    );
+    expect(payTxn.signer).toBe(sender.txnSigner);
+
+    const appTxn = getTxn(txns, 1);
+    if (!appTxn.txn.applicationCall)
+      throw new Error("Expected application call transaction");
+  });
+
+  it("should handle void return type method calls with ARC56", async () => {
+    const user = await localnet.generateAccount({ fund: 10_000_000n });
+    const composer = localnet.composer();
+
+    const box1 = new TextEncoder().encode("boxKey");
+    const box2 = Uint8Array.from(
+      Buffer.from(
+        "700000000000000001000000000000000200000000000000040000000000000003",
+        "hex",
+      ),
+    );
+
+    composer.addMethodCall({
+      arc56,
+      appID: appId,
+      method: "optInToApplication",
+      sender: user,
+      boxes: [
+        { appIndex: 0, name: box1 },
+        { appIndex: 0, name: box2 },
+      ],
+      onComplete: algosdk.OnApplicationComplete.OptInOC,
+    });
+
+    const result = await composer.execute(localnet.algod);
+    expect(result.methodResults.length).toBe(1);
+    const r = getResult(result, 0);
+    expect(r.returnValue).toBeUndefined();
+  });
+
+  it("should decode return value when simulating transaction group with simulate()", async () => {
+    const composer = localnet.composer();
+    const inputs = { add: { a: 11n, b: 22n }, subtract: { a: 33n, b: 11n } };
+
+    composer.addMethodCall({
+      arc56,
+      appID: appId,
+      method: "foo",
+      sender,
+      methodArgs: [inputs],
+    });
+
+    const simResult = await composer.simulate(localnet.algod);
+    expect(simResult.methodResults.length).toBe(1);
+    const r = getResult(simResult, 0);
+    expect(r.returnValue).toEqual({
+      sum: 33n,
+      difference: 22n,
+    });
+  });
+
+  it("should not call the sender's signer when simulating with skipSignatures", async () => {
+    const unsignableSender = {
+      address: sender.address,
+      // eslint-disable-next-line @typescript-eslint/require-await
+      txnSigner: async () => {
+        throw new Error("signer should not be called");
+      },
+    };
+    const composer = localnet.composer();
+    const inputs = { add: { a: 1n, b: 2n }, subtract: { a: 3n, b: 1n } };
+
+    composer.addMethodCall({
+      arc56,
+      appID: appId,
+      method: "foo",
+      sender: unsignableSender,
+      methodArgs: [inputs],
+    });
+
+    const simResult = await composer.simulate(localnet.algod, {
+      skipSignatures: true,
+    });
+    expect(simResult.simulateResponse.txnGroups[0]?.failureMessage).toBe(
+      undefined,
+    );
+    expect(simResult.methodResults.length).toBe(1);
+    expect(getResult(simResult, 0).returnValue).toEqual({
+      sum: 3n,
+      difference: 2n,
+    });
+  });
+
+  it("should use the sender's emptyTxnSigner when simulating with skipSignatures", async () => {
+    let emptySignerCalls = 0;
+    const emptySender = {
+      ...sender,
+      // eslint-disable-next-line @typescript-eslint/require-await
+      txnSigner: async () => {
+        throw new Error("signer should not be called");
+      },
+      emptyTxnSigner: (
+        txns: algosdk.Transaction[],
+        indexes: number[],
+      ): Promise<Uint8Array[]> => {
+        emptySignerCalls += 1;
+        return algosdk.makeEmptyTransactionSigner()(txns, indexes);
+      },
+    };
+    const composer = localnet.composer();
+
+    composer
+      .addPayment({
+        sender: emptySender,
+        receiver: sender.address,
+        amount: 0n,
+        note: new TextEncoder().encode("empty signer"),
+      })
+      .addPayment({
+        sender,
+        receiver: sender.address,
+        amount: 0n,
+        note: new TextEncoder().encode("default empty signer"),
+      });
+
+    const simResult = await composer.simulate(localnet.algod, {
+      skipSignatures: true,
+    });
+    expect(simResult.simulateResponse.txnGroups[0]?.failureMessage).toBe(
+      undefined,
+    );
+    // Once when simulating for fees, once more for the final simulate
+    expect(emptySignerCalls).toBe(2);
+  });
+
+  it("should throw when simulate fails unless throwOnFailure is false", async () => {
+    const failingCall = () =>
+      localnet.composer().addMethodCall({
+        arc56,
+        appID: appId,
+        method: "foo",
+        sender,
+        methodArgs: [{ add: { a: 1n, b: 2n }, subtract: { a: 1n, b: 100n } }],
+      });
+    // Passes fee simulation, then fails for paying no fee
+    const underpaying = () =>
+      localnet.composer().addPayment({
+        sender,
+        receiver: sender.address,
+        amount: 0n,
+        staticFee: 0n,
+      });
+
+    for (const composer of [failingCall, underpaying]) {
+      const error = await composer()
+        .simulate(localnet.algod)
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(Error);
+      if (!(error instanceof Error)) throw new Error("Expected an error");
+      expect(error.cause).toBeInstanceOf(algosdk.modelsv2.SimulateResponse);
+      const response = error.cause as algosdk.modelsv2.SimulateResponse;
+      expect(error.message).toBe(response.txnGroups[0]?.failureMessage ?? "");
+
+      const result = await composer().simulate(localnet.algod, {
+        throwOnFailure: false,
+      });
+      expect(result.simulateResponse.txnGroups[0]?.failureMessage).toBe(
+        error.message,
+      );
+    }
+  });
+
+  it("should use the sender's signer when simulating without skipSignatures", async () => {
+    const unsignableSender = {
+      address: sender.address,
+      // eslint-disable-next-line @typescript-eslint/require-await
+      txnSigner: async () => {
+        throw new Error("signer was called");
+      },
+    };
+
+    await expect(
+      localnet
+        .composer()
+        .addPayment({
+          sender: unsignableSender,
+          receiver: sender.address,
+          amount: 0n,
+        })
+        .simulate(localnet.algod),
+    ).rejects.toThrow("signer was called");
+  });
+
+  it("should throw when skipSignatures is combined with allowEmptySignatures: false", async () => {
+    await expect(
+      localnet
+        .composer()
+        .addPayment({ sender, receiver: sender.address, amount: 0n })
+        .simulate(localnet.algod, {
+          skipSignatures: true,
+          allowEmptySignatures: false,
+        }),
+    ).rejects.toThrow("Cannot simulate with skipSignatures");
+  });
+
+  it("should keep skipSignatures defaults when allowEmptySignatures and fixSigners are explicitly undefined", async () => {
+    const simResult = await localnet
+      .composer()
+      .addPayment({ sender, receiver: sender.address, amount: 0n })
+      .simulate(localnet.algod, {
+        skipSignatures: true,
+        allowEmptySignatures: undefined,
+        fixSigners: undefined,
+      });
+    expect(simResult.simulateResponse.txnGroups[0]?.failureMessage).toBe(
+      undefined,
+    );
+  });
+
+  it("should support latest ARC56 StructField[] format in Composer", async () => {
+    const arc56LatestStructs: ARC56Contract = {
+      ...arc56,
+      structs: {
+        "{ foo: uint16; bar: uint16 }": [
+          { name: "foo", type: "uint16" },
+          { name: "bar", type: "uint16" },
+        ],
+        Outputs: [
+          { name: "sum", type: "uint64" },
+          { name: "difference", type: "uint64" },
+        ],
+        Inputs: [
+          {
+            name: "add",
+            type: [
+              { name: "a", type: "uint64" },
+              { name: "b", type: "uint64" },
+            ],
+          },
+          {
+            name: "subtract",
+            type: [
+              { name: "a", type: "uint64" },
+              { name: "b", type: "uint64" },
+            ],
+          },
+        ],
+      },
+    };
+
+    const composer = localnet.composer();
+    const inputs = { add: { a: 25n, b: 75n }, subtract: { a: 50n, b: 10n } };
+
+    composer.addMethodCall({
+      arc56: arc56LatestStructs,
+      appID: appId,
+      method: "foo",
+      sender,
+      methodArgs: [inputs],
+    });
+
+    const result = await composer.execute(localnet.algod);
+    expect(result.methodResults.length).toBe(1);
+    const r = getResult(result, 0);
+    expect(r.returnValue).toEqual({
+      sum: 100n,
+      difference: 40n,
+    });
+  });
+
+  it("should automatically decode return value when getParams from ARC56AppClient is passed to Composer", async () => {
+    const appClient = new ARC56AppClient({
+      arc56,
+      appId,
+      algod: localnet.algod,
+    });
+
+    const inputs = { add: { a: 5n, b: 5n }, subtract: { a: 20n, b: 8n } };
+    const composer = localnet.composer();
+
+    composer.addMethodCall(
+      appClient.getParams({
+        method: "foo",
+        sender,
+        methodArgs: [inputs],
+      }),
+    );
+
+    const result = await composer.execute(localnet.algod);
+    expect(result.methodResults.length).toBe(1);
+    const r = getResult(result, 0);
+    expect(r.returnValue).toEqual({
+      sum: 10n,
+      difference: 12n,
+    });
+  });
+
+  it("should throw error if method is a string without arc56 attached", async () => {
+    const composer = localnet.composer();
+
+    await expect(
+      composer
+        // @ts-expect-error method as string without arc56 should be invalid at type and runtime level
+        .addMethodCall({
+          appID: appId,
+          method: "foo",
+          sender,
+        })
+        .buildGroupOffline(),
+    ).rejects.toThrow(
+      "ARC56 definition is required when method is specified as a string",
+    );
+  });
+
+  it("should auto-populate recommendations (boxes, accounts, apps, assets) if omitted", async () => {
+    const boxKeyB64 = Buffer.from("myBoxKey").toString("base64");
+    const baseMethod = arc56.methods[0];
+    if (!baseMethod) throw new Error("Expected at least one method");
+
+    const arc56WithRecommendations: ARC56Contract = {
+      ...arc56,
+      methods: [
+        {
+          ...baseMethod,
+          name: "methodWithRecs",
+          recommendations: {
+            boxes: [{ key: boxKeyB64, app: 0 }],
+            accounts: [sender.address.toString()],
+            apps: [1001, 1002],
+            assets: [2001, 2002],
+          },
+        },
+      ],
+    };
+
+    const composer = localnet.composer();
+    composer.addMethodCall({
+      arc56: arc56WithRecommendations,
+      appID: appId,
+      method: "methodWithRecs",
+      sender,
+      methodArgs: [{ add: { a: 1n, b: 2n }, subtract: { a: 10n, b: 5n } }],
+    });
+
+    const txns = await composer.buildGroupOffline();
+    const appTxn = getTxn(txns, 0).txn;
+
+    if (!appTxn.applicationCall) {
+      throw new Error("Expected applicationCall transaction");
+    }
+
+    expect(appTxn.applicationCall.boxes.length).toBe(1);
+    const box = appTxn.applicationCall.boxes[0];
+    if (!box) throw new Error("Expected box reference");
+    expect(box.name).toEqual(new TextEncoder().encode("myBoxKey"));
+    expect(appTxn.applicationCall.accounts.map((a) => a.toString())).toEqual([
+      sender.address.toString(),
+    ]);
+    expect(appTxn.applicationCall.foreignApps).toEqual([1001n, 1002n]);
+    expect(appTxn.applicationCall.foreignAssets).toEqual([2001n, 2002n]);
+  });
+
+  it("should set an exact fee with staticFee", async () => {
+    const receiver = await localnet.generateAccount({});
+
+    const txns = await localnet
+      .composer()
+      .addPayment({
+        sender,
+        receiver: receiver.address,
+        amount: 0n,
+        staticFee: 0n,
+      })
+      .addMethodCall({
+        arc56,
+        appID: appId,
+        method: "foo",
+        sender,
+        staticFee: 5_000n,
+        methodArgs: [{ add: { a: 1n, b: 2n }, subtract: { a: 10n, b: 5n } }],
+      })
+      .buildGroupOffline();
+
+    expect(getTxn(txns, 0).txn.fee).toBe(0n);
+    expect(getTxn(txns, 1).txn.fee).toBe(5_000n);
+  });
+
+  it("should cover a zero-fee transaction with feePercent: 1", async () => {
+    const composer = new Composer({
+      getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
+    });
+
+    const txns = await composer
+      .addPayment({
+        sender,
+        receiver: sender.address,
+        amount: 0n,
+      })
+      .addMethodCall({
+        arc56,
+        appID: appId,
+        method: "foo",
+        sender,
+        feePercent: 1,
+        methodArgs: [{ add: { a: 1n, b: 2n }, subtract: { a: 10n, b: 5n } }],
+      })
+      .buildGroup(localnet.algod);
+
+    expect(getTxn(txns, 0).txn.fee).toBe(0n);
+    const fee = getTxn(txns, 1).txn.fee;
+    expect(fee).toBe(2_000n);
+
+    const result = await composer.execute(localnet.algod);
+    expect(result.confirmedRound).toBeGreaterThan(0n);
+    expect(getResult(result, 0).returnValue).toEqual({
+      sum: 3n,
+      difference: 5n,
+    });
+  });
+
+  it("should cover a large transaction with feePercent: 1", async () => {
+    const composer = new Composer({
+      getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
+    });
+
+    const txns = await composer
+      .addPayment({
+        sender,
+        receiver: sender.address,
+        amount: 0n,
+        note: new Uint8Array(4096),
+        feePercent: 1,
+      })
+      .buildGroup(localnet.algod);
+
+    expect(getTxn(txns, 0).txn.fee).toBe(1_308n);
+  });
+
+  it("should cover a pqsig transaction with a capped feePercent: 1", async () => {
+    const emptyFalcon: Falcon1024SigningKey = {
+      falcon1024PublicKey: new Uint8Array(),
+      // eslint-disable-next-line @typescript-eslint/require-await, @typescript-eslint/no-unused-vars
+      falcon1024Signer: async (_: Uint8Array) => {
+        return new Uint8Array();
+      },
+    };
+
+    const pqSender =
+      algosdk.addressWithSignersFromRawFalcon1024Signer(emptyFalcon);
+    const composer = new Composer({
+      getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
+    });
+    await localnet.fundAccount(pqSender.address, 1_000_000n);
+
+    const txns = await composer
+      .addPayment({
+        sender: pqSender,
+        receiver: sender.address,
+        amount: 0n,
+        feePercent: 1,
+      })
+      .buildGroup(localnet.algod);
+
+    expect(getTxn(txns, 0).txn.fee).toBe(3_000n);
+  });
+
+  it("should distribute the group fee across transactions that don't specify feePercent", async () => {
+    const composer = new Composer({
+      getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
+    });
+
+    const txns = await composer
+      .addPayment({
+        sender,
+        receiver: sender.address,
+        amount: 0n,
+        note: new Uint8Array(2048),
+      })
+      .addPayment({
+        sender,
+        receiver: sender.address,
+        amount: 0n,
+        note: new Uint8Array(2048),
+      })
+      .buildGroup(localnet.algod);
+
+    const fee0 = getTxn(txns, 0).txn.fee;
+    const fee1 = getTxn(txns, 1).txn.fee;
+    expect(fee0).toBe(fee1);
+    expect(fee0).toBeGreaterThan(0n);
+  });
+
+  it("should throw error when feePercent values don't sum to 1", async () => {
+    const composer = new Composer({
+      getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
+    });
+
+    await expect(
+      composer
+        .addPayment({
+          sender,
+          receiver: sender.address,
+          amount: 0n,
+          feePercent: 0.5,
+        })
+        .addPayment({
+          sender,
+          receiver: sender.address,
+          amount: 0n,
+          feePercent: 0.25,
+        })
+        .buildGroup(localnet.algod),
+    ).rejects.toThrow("feePercent across the group must sum to 1");
+  });
+
+  it("should not change the fee of a transaction with a staticFee", async () => {
+    const composer = new Composer({
+      getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
+    });
+
+    const txns = await composer
+      .addPayment({
+        sender,
+        receiver: sender.address,
+        amount: 0n,
+        staticFee: 0n,
+      })
+      .addPayment({
+        sender,
+        receiver: sender.address,
+        amount: 0n,
+        note: new Uint8Array(4096),
+        feePercent: 1,
+      })
+      .buildGroup(localnet.algod);
+
+    expect(getTxn(txns, 0).txn.fee).toBe(0n);
+    expect(getTxn(txns, 1).txn.fee).toBeGreaterThan(0n);
+    expect(getTxn(txns, 1).txn.fee).toBeGreaterThan(1_000n);
+  });
+
+  it("should let a zero-fee transaction be covered by another transaction's staticFee", async () => {
+    const payer = await localnet.generateAccount({ fund: 10_000_000n });
+
+    const result = await localnet
+      .composer()
+      .addPayment({
+        sender: payer,
+        receiver: payer.address,
+        amount: 0n,
+        staticFee: 0n,
+      })
+      .addPayment({
+        sender: payer,
+        receiver: payer.address,
+        amount: 0n,
+        // Its own fee plus the fee the transaction above did not pay
+        staticFee: 2_000n,
+      })
+      .execute(localnet.algod);
+
+    expect(result.confirmedRound).toBeGreaterThan(0n);
+  });
+
+  it("should set a staticUsage fee based on the current min fee", async () => {
+    const receiver = await localnet.generateAccount({});
+
+    const txns = await localnet
+      .composer()
+      .addPayment({
+        sender,
+        receiver: receiver.address,
+        amount: 0n,
+        staticUsage: 2_000_000n,
+      })
+      .buildGroupOffline();
+
+    expect(getTxn(txns, 0).txn.fee).toBe(2_000n);
+  });
+
+  it("should split the group fee across a staticUsage and an equal-split transaction", async () => {
+    const composer = new Composer({
+      getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
+    });
+
+    const txns = await composer
+      .addPayment({
+        sender,
+        receiver: sender.address,
+        amount: 0n,
+        staticUsage: 1_000_000n,
+      })
+      .addPayment({
+        sender,
+        receiver: sender.address,
+        amount: 0n,
+      })
+      .buildGroup(localnet.algod);
+
+    expect(getTxn(txns, 0).txn.fee).toBe(1_000n);
+    expect(getTxn(txns, 1).txn.fee).toBeGreaterThan(0n);
+  });
+
+  it("should let a zero-fee transaction be covered by another transaction's staticUsage", async () => {
+    const payer = await localnet.generateAccount({ fund: 10_000_000n });
+
+    const result = await localnet
+      .composer()
+      .addPayment({
+        sender: payer,
+        receiver: payer.address,
+        amount: 0n,
+        staticFee: 0n,
+      })
+      .addPayment({
+        sender: payer,
+        receiver: payer.address,
+        amount: 0n,
+        // Its own usage plus the usage the transaction above did not cover
+        staticUsage: 2_000_000n,
+      })
+      .execute(localnet.algod);
+
+    expect(result.confirmedRound).toBeGreaterThan(0n);
+  });
+
+  it("should throw error when staticUsage is combined with staticFee", () => {
+    expect(() =>
+      new Composer({
+        getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
+      }).addPayment({
+        sender,
+        receiver: sender.address,
+        amount: 0n,
+        staticFee: 0n,
+        staticUsage: 1_000_000n,
+      }),
+    ).toThrow("staticFee, staticUsage and feePercent are mutually exclusive");
+  });
+
+  it("should throw error when staticUsage is combined with feePercent", () => {
+    expect(() =>
+      new Composer({
+        getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
+      }).addPayment({
+        sender,
+        receiver: sender.address,
+        amount: 0n,
+        feePercent: 1,
+        staticUsage: 1_000_000n,
+      }),
+    ).toThrow("staticFee, staticUsage and feePercent are mutually exclusive");
+  });
+
+  it("should not change the fee of a transaction within its maxUsage", async () => {
+    const composer = new Composer({
+      getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
+    });
+
+    const txns = await composer
+      .addPayment({
+        sender,
+        receiver: sender.address,
+        amount: 0n,
+        maxUsage: 1_000_000n,
+      })
+      .buildGroup(localnet.algod);
+
+    expect(getTxn(txns, 0).txn.fee).toBe(1_000n);
+  });
+
+  it("should throw when a transaction's fee exceeds its maxUsage", async () => {
+    const composer = new Composer({
+      getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
+    });
+
+    await expect(
+      composer
+        .addPayment({
+          sender,
+          receiver: sender.address,
+          amount: 0n,
+          note: new Uint8Array(4096),
+          maxUsage: 1_000_000n,
+        })
+        .buildGroup(localnet.algod),
+    ).rejects.toThrow("maxUsage exceeded");
+  });
+
+  it("should throw on simulate when a transaction's fee exceeds its maxUsage", async () => {
+    const composer = new Composer({
+      getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
+    });
+
+    await expect(
+      composer
+        .addPayment({
+          sender,
+          receiver: sender.address,
+          amount: 0n,
+          note: new Uint8Array(4096),
+          maxUsage: 1_000_000n,
+        })
+        .simulate(localnet.algod),
+    ).rejects.toThrow("maxUsage exceeded");
+  });
+
+  it("should throw error when maxUsage is combined with staticUsage", () => {
+    expect(() =>
+      new Composer({
+        getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
+      }).addPayment({
+        sender,
+        receiver: sender.address,
+        amount: 0n,
+        staticUsage: 1_000_000n,
+        maxUsage: 1_000_000n,
+      }),
+    ).toThrow("maxUsage cannot be combined with staticFee or staticUsage");
+  });
+
+  it.each([0, 1, 2])(
+    "should preserve a pre-built transaction's fee at group index %s",
+    async (prebuiltIndex) => {
+      const payer = await localnet.generateAccount({ fund: 1_000_000n });
+      const suggestedParams = await localnet.algod.getTransactionParams().do();
+      const prebuilt = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+        sender: payer.address,
+        receiver: payer.address,
+        amount: 0n,
+        suggestedParams: { ...suggestedParams, fee: 1_000n, flatFee: true },
+      });
+      const composer = localnet.composer();
+      for (let i = 0; i < 3; i++) {
+        if (i === prebuiltIndex) {
+          composer.addTransaction(prebuilt, payer.txnSigner);
+        } else {
+          composer.addPayment({
+            sender,
+            receiver: sender.address,
+            amount: 0n,
+            note: Uint8Array.of(i),
+          });
+        }
+      }
+
+      const txns = await composer.buildGroup(localnet.algod);
+      expect(txns.map((t) => t.txn.fee)).toEqual([1_000n, 1_000n, 1_000n]);
+      expect(prebuilt.fee).toBe(1_000n);
+
+      const before = (
+        await localnet.algod.accountInformation(payer.address).do()
+      ).amount;
+      await composer.execute(localnet.algod);
+      const after = (
+        await localnet.algod.accountInformation(payer.address).do()
+      ).amount;
+      expect(before - after).toBe(1_000n);
+    },
+  );
+
+  it("should apply feePercent to the correct sender after a pre-built transaction", async () => {
+    const payer = await localnet.generateAccount({ fund: 1_000_000n });
+    const covered = await localnet.generateAccount({ fund: 1_000_000n });
+    const suggestedParams = await localnet.algod.getTransactionParams().do();
+    const prebuilt = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+      sender: payer.address,
+      receiver: payer.address,
+      amount: 0n,
+      suggestedParams: { ...suggestedParams, fee: 1_000n, flatFee: true },
+    });
+
+    const txns = await localnet
+      .composer()
+      .addTransaction({ txn: prebuilt, signer: payer.txnSigner })
+      .addPayment({
+        sender: covered,
+        receiver: covered.address,
+        amount: 0n,
+        feePercent: 0,
+      })
+      .addPayment({
+        sender,
+        receiver: sender.address,
+        amount: 0n,
+        feePercent: 1,
+      })
+      .buildGroup(localnet.algod);
+
+    expect(txns.map((t) => t.txn.fee)).toEqual([1_000n, 0n, 2_000n]);
+    expect(prebuilt.fee).toBe(1_000n);
+  });
+
+  it("should sponsor a zero-fee pre-built transaction from a minimum-balance sender", async () => {
+    const covered = await localnet.generateAccount({ fund: 100_000n });
+    const suggestedParams = await localnet.algod.getTransactionParams().do();
+    const prebuilt = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+      sender: covered.address,
+      receiver: covered.address,
+      amount: 0n,
+      suggestedParams: { ...suggestedParams, fee: 0n, flatFee: true },
+    });
+    const composer = localnet
+      .composer()
+      .addTransaction(prebuilt, covered.txnSigner)
+      .addPayment({
+        sender,
+        receiver: sender.address,
+        amount: 0n,
+        feePercent: 1,
+      });
+
+    const txns = await composer.buildGroup(localnet.algod);
+    expect(txns.map((t) => t.txn.fee)).toEqual([0n, 2_000n]);
+    expect(prebuilt.fee).toBe(0n);
+
+    const result = await composer.execute(localnet.algod);
+    expect(result.confirmedRound).toBeGreaterThan(0n);
+    expect(
+      (await localnet.algod.accountInformation(covered.address).do()).amount,
+    ).toBe(100_000n);
+  });
+
+  it("should accept a pre-built transaction", async () => {
+    const suggestedParams = await localnet.algod.getTransactionParams().do();
+
+    const prebuilt = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+      sender: sender.address,
+      receiver: sender.address,
+      amount: 0n,
+      suggestedParams,
+    });
+
+    const result = await localnet
+      .composer()
+      .addTransaction(prebuilt, sender.txnSigner)
+      .addMethodCall({
+        arc56,
+        appID: appId,
+        method: "foo",
+        sender,
+        methodArgs: [{ add: { a: 1n, b: 2n }, subtract: { a: 10n, b: 5n } }],
+      })
+      .execute(localnet.algod);
+
+    expect(result.txIDs.length).toBe(2);
+    expect(getResult(result, 0).returnValue).toEqual({
+      sum: 3n,
+      difference: 5n,
+    });
+  });
+
+  it("should accept a pre-built TransactionWithSigner", async () => {
+    const suggestedParams = await localnet.algod.getTransactionParams().do();
+
+    const txn = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+      sender: sender.address,
+      receiver: sender.address,
+      amount: 0n,
+      suggestedParams,
+    });
+
+    const result = await localnet
+      .composer()
+      .addTransaction({ txn, signer: sender.txnSigner })
+      .execute(localnet.algod);
+
+    expect(result.txIDs.length).toBe(1);
+  });
+
+  it("should reject a pre-built transaction with no signer", async () => {
+    const suggestedParams = await localnet.algod.getTransactionParams().do();
+
+    const txn = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+      sender: sender.address,
+      receiver: sender.address,
+      amount: 1n,
+      suggestedParams,
+    });
+
+    expect(() => localnet.composer().addTransaction(txn as never)).toThrow(
+      "A TransactionSigner is required",
+    );
+  });
+
+  it("should build a key registration transaction", async () => {
+    const voteKey = new Uint8Array(32);
+    const selectionKey = new Uint8Array(32);
+    const stateProofKey = new Uint8Array(64);
+
+    const txns = await localnet
+      .composer()
+      .addKeyReg({
+        sender,
+        voteKey,
+        selectionKey,
+        stateProofKey,
+        voteFirst: 10n,
+        voteLast: 20n,
+        voteKeyDilution: 10000n,
+      })
+      .buildGroupOffline();
+
+    const txn = getTxn(txns, 0).txn;
+    if (!txn.keyreg) throw new Error("Expected keyreg transaction");
+    expect(txn.keyreg.voteKey).toEqual(voteKey);
+    expect(txn.keyreg.selectionKey).toEqual(selectionKey);
+    expect(txn.keyreg.stateProofKey).toEqual(stateProofKey);
+    expect(txn.keyreg.voteFirst).toBe(10n);
+    expect(txn.keyreg.voteLast).toBe(20n);
+    expect(txn.keyreg.voteKeyDilution).toBe(10000n);
+  });
+
+  it("should build an asset create transaction", async () => {
+    const txns = await localnet
+      .composer()
+      .addAssetCreate({
+        sender,
+        total: 1000n,
+        decimals: 2,
+        unitName: "UNIT",
+        assetName: "Unit Token",
+        defaultFrozen: false,
+      })
+      .buildGroupOffline();
+
+    const txn = getTxn(txns, 0).txn;
+    if (!txn.assetConfig) throw new Error("Expected asset config transaction");
+    expect(txn.assetConfig.total).toBe(1000n);
+    expect(txn.assetConfig.decimals).toBe(2);
+    expect(txn.assetConfig.unitName).toBe("UNIT");
+    expect(txn.assetConfig.assetName).toBe("Unit Token");
+    expect(txn.assetConfig.defaultFrozen).toBe(false);
+  });
+
+  it("should build an asset transfer (opt-in) transaction", async () => {
+    const txns = await localnet
+      .composer()
+      .addAssetTransfer({
+        sender,
+        receiver: sender.address,
+        assetIndex: 1001n,
+        amount: 0n,
+      })
+      .buildGroupOffline();
+
+    const txn = getTxn(txns, 0).txn;
+    if (!txn.assetTransfer)
+      throw new Error("Expected asset transfer transaction");
+    expect(txn.assetTransfer.assetIndex).toBe(1001n);
+    expect(txn.assetTransfer.amount).toBe(0n);
+    expect(txn.assetTransfer.receiver.toString()).toBe(
+      sender.address.toString(),
+    );
+  });
+
+  it("should build an asset config (modify roles) transaction", async () => {
+    const manager = sender.address;
+    const txns = await localnet
+      .composer()
+      .addAssetConfig({
+        sender,
+        assetIndex: 1001n,
+        manager,
+        strictEmptyAddressChecking: false,
+      })
+      .buildGroupOffline();
+
+    const txn = getTxn(txns, 0).txn;
+    if (!txn.assetConfig) throw new Error("Expected asset config transaction");
+    expect(txn.assetConfig.assetIndex).toBe(1001n);
+    if (!txn.assetConfig.manager)
+      throw new Error("Expected asset config manager");
+    expect(txn.assetConfig.manager.toString()).toBe(manager.toString());
+  });
+
+  it("should build an asset destroy transaction", async () => {
+    const txns = await localnet
+      .composer()
+      .addAssetDestroy({ sender, assetIndex: 1001n })
+      .buildGroupOffline();
+
+    const txn = getTxn(txns, 0).txn;
+    if (!txn.assetConfig) throw new Error("Expected asset config transaction");
+    expect(txn.assetConfig.assetIndex).toBe(1001n);
+  });
+
+  it("should build an asset freeze transaction", async () => {
+    const txns = await localnet
+      .composer()
+      .addAssetFreeze({
+        sender,
+        assetIndex: 1001n,
+        freezeTarget: sender.address,
+        frozen: true,
+      })
+      .buildGroupOffline();
+
+    const txn = getTxn(txns, 0).txn;
+    if (!txn.assetFreeze) throw new Error("Expected asset freeze transaction");
+    expect(txn.assetFreeze.assetIndex).toBe(1001n);
+    expect(txn.assetFreeze.freezeAccount.toString()).toBe(
+      sender.address.toString(),
+    );
+    expect(txn.assetFreeze.frozen).toBe(true);
+  });
+
+  it("should build an application opt-in call with the correct onComplete and appIndex", async () => {
+    const txns = await localnet
+      .composer()
+      .addAppOptIn({ sender, appID: appId })
+      .buildGroupOffline();
+
+    const txn = getTxn(txns, 0).txn;
+    if (!txn.applicationCall)
+      throw new Error("Expected application call transaction");
+    expect(txn.applicationCall.onComplete).toBe(
+      algosdk.OnApplicationComplete.OptInOC,
+    );
+    expect(txn.applicationCall.appIndex).toBe(appId);
+  });
+
+  it("should build an application call with appID normalized to appIndex", async () => {
+    const txns = await localnet
+      .composer()
+      .addAppCall({
+        sender,
+        appID: appId,
+        onComplete: algosdk.OnApplicationComplete.NoOpOC,
+        appArgs: [new TextEncoder().encode("hello")],
+      })
+      .buildGroupOffline();
+
+    const txn = getTxn(txns, 0).txn;
+    if (!txn.applicationCall)
+      throw new Error("Expected application call transaction");
+    expect(txn.applicationCall.appIndex).toBe(appId);
+    expect(txn.applicationCall.onComplete).toBe(
+      algosdk.OnApplicationComplete.NoOpOC,
+    );
+    expect(txn.applicationCall.appArgs.length).toBe(1);
+  });
+
+  it("should build each app call variant with its own onComplete", async () => {
+    const cases: Array<[string, (c: Composer) => void, number]> = [
+      ["addAppUpdate", (c) => c.addAppUpdate({ sender, appID: appId }), 4],
+      ["addAppDelete", (c) => c.addAppDelete({ sender, appID: appId }), 5],
+      ["addAppCloseOut", (c) => c.addAppCloseOut({ sender, appID: appId }), 2],
+      [
+        "addAppClearState",
+        (c) => c.addAppClearState({ sender, appID: appId }),
+        3,
+      ],
+      ["addAppNoOp", (c) => c.addAppNoOp({ sender, appID: appId }), 0],
+    ];
+
+    for (const [name, build, onComplete] of cases) {
+      const composer = localnet.composer();
+      build(composer);
+      const txns = await composer.buildGroupOffline();
+      const txn = getTxn(txns, 0).txn;
+      if (!txn.applicationCall)
+        throw new Error(`Expected application call transaction for ${name}`);
+      expect(txn.applicationCall.onComplete).toBe(onComplete);
+    }
+  });
+
+  it("should build a bare application create with addAppCreate", async () => {
+    const txns = await localnet
+      .composer()
+      .addAppCreate({
+        sender,
+        approvalProgram: new Uint8Array([0x01]),
+        clearProgram: new Uint8Array([0x01]),
+      })
+      .buildGroupOffline();
+
+    const txn = getTxn(txns, 0).txn;
+    if (!txn.applicationCall)
+      throw new Error("Expected application call transaction");
+    expect(txn.applicationCall.appIndex).toBe(0n);
+    expect(txn.applicationCall.onComplete).toBe(
+      algosdk.OnApplicationComplete.NoOpOC,
+    );
+  });
+});

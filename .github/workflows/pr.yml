@@ -46,7 +46,21 @@ jobs:
       - name: Test
         run: pnpm run test
 
+  changelog:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [composer, app-client, localnet, generator, algokit-lite]
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Check changelog
         uses: joe-p/semfrag/actions/check@e4ce6e37a786a2d283ce7edbaf235af5aa8d48b7 # v0.9.0
         with:
-          require-fragment-for: ^src/
+          changelog: packages/${{ matrix.package }}/CHANGELOG.md
+          fragments-dir: packages/${{ matrix.package }}/changelog.d
+          require-fragment-for: ^packages/${{ matrix.package }}/src/

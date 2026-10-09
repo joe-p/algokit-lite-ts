@@ -10,6 +10,18 @@ This library is a light wrapper around algosdk to make it easier to interact wit
 > [!IMPORTANT]
 > This library is a proof of concept and not recommended for production use. It is currently a testbed for features that may or may not be added to algosdk and/or algokit utils in the future.
 
+## Packages
+
+| Package                                                 | Contents                                                    |
+| ------------------------------------------------------- | ----------------------------------------------------------- |
+| [`@joe-p/algokit-lite`](packages/algokit-lite)          | Re-exports every package below                              |
+| [`@joe-p/algokit-lite-composer`](packages/composer)     | Transaction group composer, ARC56 types and utilities       |
+| [`@joe-p/algokit-lite-app-client`](packages/app-client) | ARC56 app client                                            |
+| [`@joe-p/algokit-lite-localnet`](packages/localnet)     | Localnet account generation and funding                     |
+| [`@joe-p/algokit-lite-generator`](packages/generator)   | Typed ARC56 app client generator and the `algokit-lite` CLI |
+
+Generated clients import from `@joe-p/algokit-lite-app-client` and `@joe-p/algokit-lite-composer`, so projects using them need both packages.
+
 ## Why Not Utils?
 
 AlgoKit Lite is intentionally much simpler than AlgoKit utils. The abstractions are smaller and the amount of "magic" happening is lower. Some AlgoKit Lite interfaces are more verbose/explicit than AlgoKit Utils, but that is intentional. This makes it easier for agents to understand the library and for humans to review the code.

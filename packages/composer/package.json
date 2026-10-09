@@ -1,0 +1,34 @@
+{
+  "name": "@joe-p/algokit-lite-composer",
+  "version": "0.0.0",
+  "description": "Transaction composer and ARC-56 utilities for algoKIT lite",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/joe-p/algokit-lite-ts",
+    "directory": "packages/composer"
+  },
+  "module": "dist/index.js",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node -e \"fs.rmSync('dist',{recursive:true,force:true})\" && tsc6 -p tsconfig.build.json",
+    "prepack": "pnpm run build"
+  },
+  "peerDependencies": {
+    "algosdk": "^3.7.0"
+  },
+  "dependencies": {
+    "algosdk": "^3.7.0"
+  }
+}

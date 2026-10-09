@@ -14,8 +14,14 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "noEmit": true,
+    // Resolve workspace packages to their sources, so tests and type checks
+    // don't need the packages to be built
     "paths": {
-      "@joe-p/algokit-lite": ["./src/index.ts"]
+      "@joe-p/algokit-lite": ["./packages/algokit-lite/src/index.ts"],
+      "@joe-p/algokit-lite-composer": ["./packages/composer/src/index.ts"],
+      "@joe-p/algokit-lite-app-client": ["./packages/app-client/src/index.ts"],
+      "@joe-p/algokit-lite-localnet": ["./packages/localnet/src/index.ts"],
+      "@joe-p/algokit-lite-generator": ["./packages/generator/src/index.ts"]
     },
 
     // Best practices

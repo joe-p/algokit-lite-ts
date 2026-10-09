@@ -1,0 +1,35 @@
+{
+  "name": "@joe-p/algokit-lite-app-client",
+  "version": "0.0.0",
+  "description": "ARC-56 app client for algoKIT lite",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/joe-p/algokit-lite-ts",
+    "directory": "packages/app-client"
+  },
+  "module": "dist/index.js",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node -e \"fs.rmSync('dist',{recursive:true,force:true})\" && tsc6 -p tsconfig.build.json",
+    "prepack": "pnpm run build"
+  },
+  "peerDependencies": {
+    "algosdk": "^3.7.0"
+  },
+  "dependencies": {
+    "@joe-p/algokit-lite-composer": "workspace:^",
+    "algosdk": "^3.7.0"
+  }
+}
