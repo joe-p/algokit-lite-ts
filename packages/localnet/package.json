@@ -1,6 +1,6 @@
 {
   "name": "@joe-p/algokit-lite-localnet",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "LocalNet helpers for algoKIT lite",
   "repository": {
     "type": "git",
