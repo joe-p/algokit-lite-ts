@@ -11,9 +11,6 @@ importers:
       '@eslint/js':
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.12.0)
-      '@joe-p/algokit-cli':
-        specifier: ^0.1.0
-        version: 0.1.0
       '@types/node':
         specifier: ^24.19.1
         version: 24.19.1
@@ -325,11 +322,6 @@ packages:
     resolution: {integrity: sha512-bV0Tgo9K4hfPCek+aMAn81RppFKv2ySDQeMoSZuvTASywNTnVJCArCZE2FWqpvIatKu7VMRLWlR1EazvVhDyhQ==}
     engines: {node: '>=18.18'}
 
-  '@joe-p/algokit-cli@0.1.0':
-    resolution: {integrity: sha512-qRzfuggeD0t7j/OpEfkmtG7zRinhDUPiCrqPN/gglllpZPTShxeHtzXW3oxLTaYQrZgonu+urIcQN+p8YePkIg==}
-    engines: {node: '>=22.12'}
-    hasBin: true
-
   '@jridgewell/resolve-uri@3.1.2':
     resolution: {integrity: sha512-bRISgCIjP20/tbWSPWMEi54QVPRZExkuD9lJL+UIxUKtwVJA8wW1Trb1jMs1RFXo1CBTNZ/5hpC9QvmKWdopKw==}
     engines: {node: '>=6.0.0'}
@@ -588,10 +580,6 @@ packages:
   chai@6.3.0:
     resolution: {integrity: sha512-XWAtwJ6OHO+tj0EKCs0Y2UamnyOxseZWltU4x2U2wh8g4AigdjwvtUjvLP2tqkA/avxHEtzxNaqGq/YGNwckKg==}
     engines: {node: '>=18'}
-
-  commander@15.0.0:
-    resolution: {integrity: sha512-z67u4ZhzCL/Tydu1lJARtEZYWbWaN7oYLHbsuzocr6y4N6WZAagG3RQ4FW61V1/0+jImpj293XfrcYnd1qxtPg==}
-    engines: {node: '>=22.12.0'}
 
   cross-spawn@7.0.6:
     resolution: {integrity: sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA==}
@@ -1248,10 +1236,6 @@ snapshots:
 
   '@humanwhocodes/retry@0.4.3': {}
 
-  '@joe-p/algokit-cli@0.1.0':
-    dependencies:
-      commander: 15.0.0
-
   '@jridgewell/resolve-uri@3.1.2': {}
 
   '@jridgewell/sourcemap-codec@1.6.0': {}
@@ -1486,8 +1470,6 @@ snapshots:
       qified: 0.10.1
 
   chai@6.3.0: {}
-
-  commander@15.0.0: {}
 
   cross-spawn@7.0.6:
     dependencies:
