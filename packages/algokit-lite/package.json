@@ -1,0 +1,38 @@
+{
+  "name": "@joe-p/algokit-lite",
+  "version": "0.7.0",
+  "description": "algoKIT lite: re-exports every algoKIT lite package",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/joe-p/algokit-lite-ts",
+    "directory": "packages/algokit-lite"
+  },
+  "module": "dist/index.js",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node -e \"fs.rmSync('dist',{recursive:true,force:true})\" && tsc6 -p tsconfig.build.json",
+    "prepack": "pnpm run build"
+  },
+  "peerDependencies": {
+    "algosdk": "^3.7.0"
+  },
+  "dependencies": {
+    "@joe-p/algokit-lite-app-client": "workspace:^",
+    "@joe-p/algokit-lite-composer": "workspace:^",
+    "@joe-p/algokit-lite-generator": "workspace:^",
+    "@joe-p/algokit-lite-localnet": "workspace:^",
+    "algosdk": "^3.7.0"
+  }
+}

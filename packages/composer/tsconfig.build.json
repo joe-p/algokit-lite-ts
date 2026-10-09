@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // NodeNext enforces explicit file extensions on relative imports, so the
+    // emitted JS and declarations load in Node.js and NodeNext projects
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "rewriteRelativeImportExtensions": true,
+    "noEmit": false,
+    "declaration": true,
+    "rootDir": "src",
+    "outDir": "dist",
+    "paths": {},
+    "noUnusedLocals": true
+  },
+  "include": ["src"]
+}

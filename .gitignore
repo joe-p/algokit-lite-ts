@@ -5,7 +5,7 @@ node_modules
 out
 dist
 *.tgz
-__test__/generated
+**/__test__/generated
 
 
 # code coverage
