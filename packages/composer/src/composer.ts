@@ -55,9 +55,9 @@ type ParamOverrides = {
   suggestedParams?: SuggestedParams;
   sender: ComposerSender;
   /**
-   * Pay exactly this many microAlgos of fee, ignoring the suggested fee. Use it
-   * both for transactions that pay nothing, such as logic signature calls, and
-   * for the transaction that covers them.
+   * Pay exactly this many microAlgos of fee, ignoring the suggested fee.
+   * Primarily useful for transactions that should always pay 0 fees.
+   * In most other scenarios `feePercent` should be used instead.
    */
   staticFee?: bigint;
   /**
@@ -66,6 +66,11 @@ type ParamOverrides = {
    * and feePercent.
    */
   staticUsage?: bigint;
+  /**
+   * The percentage of the total group fee this transaction should cover.
+   * In most cases you have one transaction with `feePercent: 1` to cover
+   * fees for the whole group. This can be limited with `maxUsage`.
+   */
   feePercent?: number;
   /**
    * The most group usage this transaction may pay for once its fee is set by
