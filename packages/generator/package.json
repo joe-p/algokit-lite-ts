@@ -1,6 +1,6 @@
 {
   "name": "@joe-p/algokit-lite-generator",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Typed ARC-56 client generator and CLI for algoKIT lite",
   "repository": {
     "type": "git",
