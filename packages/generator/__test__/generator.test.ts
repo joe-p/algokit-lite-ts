@@ -334,6 +334,16 @@ describe("ARC56Generator", () => {
     );
     expect(localMapVal).toBe("bar");
 
+    expect(await appClient.state.global()).toEqual({
+      keys: { globalKey: 1337n },
+      maps: { globalMap: [{ key: "foo", value: { foo: 13n, bar: 37n } }] },
+    });
+
+    expect(await appClient.state.local(dispenser)).toEqual({
+      keys: { localKey: 1337n },
+      maps: { localMap: [{ key: "foo", value: "bar" }] },
+    });
+
     const boxKeyVal = await appClient.state.keys.boxKey();
     expect(boxKeyVal).toBe("baz");
 

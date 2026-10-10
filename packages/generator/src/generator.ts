@@ -516,6 +516,52 @@ export class ARC56Generator {
     return lines;
   }
 
+  /** Whether the contract declares any keys or maps in the given storage */
+  private hasStorage(storage: "global" | "local"): boolean {
+    return (
+      Object.keys(this.arc56.state?.keys?.[storage] ?? {}).length > 0 ||
+      Object.keys(this.arc56.state?.maps?.[storage] ?? {}).length > 0
+    );
+  }
+
+  /** The name of the type of all the decoded global or local state */
+  private stateTypeName(storage: "global" | "local"): string {
+    return `${this.arc56.name}${storage === "global" ? "Global" : "Local"}State`;
+  }
+
+  getStateTypeLines(): string[] {
+    const lines: string[] = [];
+
+    (["global", "local"] as const).forEach((storage) => {
+      if (!this.hasStorage(storage)) return;
+      if (lines.length > 0) lines.push("");
+
+      lines.push(
+        `/** All the decoded ${storage} state. Keys that are not set are omitted. */`,
+        `export type ${this.stateTypeName(storage)} = {`,
+        "keys: {",
+      );
+      Object.entries(this.arc56.state?.keys?.[storage] ?? {}).forEach(
+        ([name, k]) => {
+          lines.push(
+            `${JSON.stringify(name)}?: ${this.getTypeScriptType(k.valueType)};`,
+          );
+        },
+      );
+      lines.push("};", "maps: {");
+      Object.entries(this.arc56.state?.maps?.[storage] ?? {}).forEach(
+        ([name, m]) => {
+          lines.push(
+            `${JSON.stringify(name)}: Array<{ key: ${this.getTypeScriptType(m.keyType)}; value: ${this.getTypeScriptType(m.valueType)} }>;`,
+          );
+        },
+      );
+      lines.push("};", "};");
+    });
+
+    return lines;
+  }
+
   getStateLines(): string[] {
     if (!this.arc56.state) return [];
     const hasKeys =
@@ -532,6 +578,22 @@ export class ARC56Generator {
     if (!hasKeys && !hasMaps) return [];
 
     const lines = ["state = {"];
+
+    if (this.hasStorage("global")) {
+      const stateType = this.stateTypeName("global");
+      lines.push(
+        "/** Get all the global state */",
+        `global: async (): Promise<${stateType}> => { return (await this.getState.global()) as ${stateType}; },`,
+      );
+    }
+
+    if (this.hasStorage("local")) {
+      const stateType = this.stateTypeName("local");
+      lines.push(
+        "/** Get all of an account's local state */",
+        `local: async (address: string | algosdk.Address | algosdk.AddressWithTransactionSigner): Promise<${stateType}> => { return (await this.getState.local(address)) as ${stateType}; },`,
+      );
+    }
 
     const stateKeys = this.arc56.state.keys;
     if (hasKeys && stateKeys) {
@@ -685,6 +747,8 @@ ${this.getStructTypeLines().join("\n")}
 ${this.getReturnTypesLines().join("\n")}
 
 ${this.getTemplateVariableTypeLines().join("\n")}
+
+${this.getStateTypeLines().join("\n")}
 
 export class ${this.arc56.name}Client extends ARC56AppClient {
   ${this.getConstructorLines()}

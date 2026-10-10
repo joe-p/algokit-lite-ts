@@ -39,6 +39,10 @@ function requiredExtraPages(
   return Math.max(pages - 1, 0);
 }
 
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  return a.length === b.length && a.every((byte, i) => byte === b[i]);
+}
+
 /** ARC56 action names, indexed by their OnApplicationComplete value */
 const ON_COMPLETE_STRINGS: Array<
   | "NoOp"
@@ -139,6 +143,17 @@ export type BareCreateResult = {
 };
 
 export type MethodReturnValue<T = unknown> = T;
+
+/**
+ * All the global or local state of an app, decoded with the ARC56 contract.
+ * Keys that are not set on chain are omitted.
+ */
+export type DecodedState = {
+  /** The values of the set ARC56 state keys, by key name */
+  keys: Record<string, unknown>;
+  /** The entries of each ARC56 state map, by map name */
+  maps: Record<string, Array<{ key: unknown; value: unknown }>>;
+};
 
 export interface ARC56AppClientParams {
   arc56: ARC56Contract;
@@ -284,42 +299,127 @@ export class ARC56AppClient {
     return address.toString();
   }
 
+  /** The raw key/value pairs of the app's global state */
+  private async getRawGlobalState(): Promise<algosdk.modelsv2.TealKeyValue[]> {
+    const result = await this.algod.getApplicationByID(this.appId).do();
+    return result.params?.globalState ?? [];
+  }
+
+  /** The raw key/value pairs of an account's local state for the app */
+  private async getRawLocalState(
+    address: string,
+  ): Promise<algosdk.modelsv2.TealKeyValue[]> {
+    const result = await this.algod
+      .accountApplicationInformation(address, this.appId)
+      .do();
+    return result.appLocalState?.keyValue ?? [];
+  }
+
+  /** The bytes of a state value, with uints encoded as uint64 */
+  private stateValueBytes(value: algosdk.modelsv2.TealValue): Uint8Array {
+    if (value.type === 1) {
+      return value.bytes instanceof Uint8Array
+        ? value.bytes
+        : algosdk.base64ToBytes(value.bytes);
+    }
+    const uintVal =
+      typeof value.uint === "bigint" ? value.uint : BigInt(value.uint);
+    return algosdk.encodeUint64(uintVal);
+  }
+
+  private stateKeyBytes(kv: algosdk.modelsv2.TealKeyValue): Uint8Array {
+    return kv.key instanceof Uint8Array
+      ? kv.key
+      : algosdk.base64ToBytes(kv.key);
+  }
+
+  private findStateValue(
+    state: algosdk.modelsv2.TealKeyValue[],
+    b64Key: string,
+    type: string,
+    storage: "Global" | "Local",
+  ): unknown {
+    const targetKeyBytes = algosdk.base64ToBytes(b64Key);
+
+    const keyValue = state.find((s) =>
+      bytesEqual(this.stateKeyBytes(s), targetKeyBytes),
+    );
+
+    if (!keyValue) {
+      throw new Error(`${storage} state key not found: ${b64Key}`);
+    }
+
+    return this.getTypeScriptValue(type, this.stateValueBytes(keyValue.value));
+  }
+
+  /** Decode every ARC56 key and map entry in raw global or local state */
+  private decodeState(
+    state: algosdk.modelsv2.TealKeyValue[],
+    storage: "global" | "local",
+  ): DecodedState {
+    const keyDefs = Object.entries(this.arc56.state?.keys?.[storage] ?? {}).map(
+      ([name, k]) => ({ name, k, key: algosdk.base64ToBytes(k.key) }),
+    );
+    const mapDefs = Object.entries(this.arc56.state?.maps?.[storage] ?? {})
+      .map(([name, map]) => ({
+        name,
+        map,
+        prefix: algosdk.base64ToBytes(map.prefix ?? ""),
+      }))
+      // Match the most specific prefix first
+      .sort((a, b) => b.prefix.length - a.prefix.length);
+
+    const decoded: DecodedState = {
+      keys: Object.create(null) as DecodedState["keys"],
+      maps: Object.create(null) as DecodedState["maps"],
+    };
+    for (const { name } of mapDefs) decoded.maps[name] = [];
+
+    for (const kv of state) {
+      const keyBytes = this.stateKeyBytes(kv);
+      const valueBytes = this.stateValueBytes(kv.value);
+
+      const keyDef = keyDefs.find(({ key }) => bytesEqual(key, keyBytes));
+      if (keyDef) {
+        decoded.keys[keyDef.name] = this.getTypeScriptValue(
+          keyDef.k.valueType,
+          valueBytes,
+        );
+        continue;
+      }
+
+      for (const { name, map, prefix } of mapDefs) {
+        if (!bytesEqual(keyBytes.subarray(0, prefix.length), prefix)) continue;
+        let key: unknown;
+        try {
+          key = this.getTypeScriptValue(
+            map.keyType,
+            keyBytes.subarray(prefix.length),
+          );
+        } catch {
+          // Not an entry of this map, so try the next one
+          continue;
+        }
+        const value = this.getTypeScriptValue(map.valueType, valueBytes);
+        decoded.maps[name]?.push({ key, value });
+        break;
+      }
+    }
+
+    return decoded;
+  }
+
   private async getLocalStateValue(
     address: string,
     b64Key: string,
     type: string,
   ): Promise<unknown> {
-    const result = await this.algod
-      .accountApplicationInformation(address, this.appId)
-      .do();
-
-    const localState = result.appLocalState?.keyValue ?? [];
-    const targetKeyBytes = algosdk.base64ToBytes(b64Key);
-
-    const keyValue = localState.find((s) => {
-      const keyBytes =
-        s.key instanceof Uint8Array ? s.key : algosdk.base64ToBytes(s.key);
-      if (keyBytes.length !== targetKeyBytes.length) return false;
-      return keyBytes.every((b, i) => b === targetKeyBytes[i]);
-    });
-
-    if (!keyValue) {
-      throw new Error(`Local state key not found: ${b64Key}`);
-    }
-
-    if (keyValue.value.type === 1) {
-      const bytes =
-        keyValue.value.bytes instanceof Uint8Array
-          ? keyValue.value.bytes
-          : algosdk.base64ToBytes(keyValue.value.bytes);
-      return this.getTypeScriptValue(type, bytes);
-    } else {
-      const uintVal =
-        typeof keyValue.value.uint === "bigint"
-          ? keyValue.value.uint
-          : BigInt(keyValue.value.uint);
-      return this.getTypeScriptValue(type, algosdk.encodeUint64(uintVal));
-    }
+    return this.findStateValue(
+      await this.getRawLocalState(address),
+      b64Key,
+      type,
+      "Local",
+    );
   }
 
   private async getBoxValue(b64Key: string, type: string): Promise<unknown> {
@@ -339,35 +439,12 @@ export class ARC56AppClient {
     b64Key: string,
     type: string,
   ): Promise<unknown> {
-    const result = await this.algod.getApplicationByID(this.appId).do();
-
-    const globalState = result.params?.globalState ?? [];
-    const targetKeyBytes = algosdk.base64ToBytes(b64Key);
-
-    const keyValue = globalState.find((s) => {
-      const keyBytes =
-        s.key instanceof Uint8Array ? s.key : algosdk.base64ToBytes(s.key);
-      if (keyBytes.length !== targetKeyBytes.length) return false;
-      return keyBytes.every((b, i) => b === targetKeyBytes[i]);
-    });
-
-    if (!keyValue) {
-      throw new Error(`Global state key not found: ${b64Key}`);
-    }
-
-    if (keyValue.value.type === 1) {
-      const bytes =
-        keyValue.value.bytes instanceof Uint8Array
-          ? keyValue.value.bytes
-          : algosdk.base64ToBytes(keyValue.value.bytes);
-      return this.getTypeScriptValue(type, bytes);
-    } else {
-      const uintVal =
-        typeof keyValue.value.uint === "bigint"
-          ? keyValue.value.uint
-          : BigInt(keyValue.value.uint);
-      return this.getTypeScriptValue(type, algosdk.encodeUint64(uintVal));
-    }
+    return this.findStateValue(
+      await this.getRawGlobalState(),
+      b64Key,
+      type,
+      "Global",
+    );
   }
 
   private getABIValue(type: string, value: unknown): algosdk.ABIValue {
@@ -807,6 +884,32 @@ export class ARC56AppClient {
   }
 
   getState = {
+    /**
+     * Get all the app's global state, decoded with the ARC56 state keys and
+     * maps. Keys that are not set are omitted, and entries that match no ARC56
+     * key or map are ignored. An entry whose bytes exactly match an ARC56 key
+     * is always decoded as that key, even if it was written as a map entry.
+     */
+    global: async (): Promise<DecodedState> => {
+      return this.decodeState(await this.getRawGlobalState(), "global");
+    },
+
+    /**
+     * Get all of an account's local state for the app, decoded with the ARC56
+     * state keys and maps. Keys that are not set are omitted, and entries that
+     * match no ARC56 key or map are ignored. An entry whose bytes exactly match
+     * an ARC56 key is always decoded as that key, even if it was written as a
+     * map entry.
+     */
+    local: async (
+      address: string | algosdk.Address | AddressWithTransactionSigner,
+    ): Promise<DecodedState> => {
+      return this.decodeState(
+        await this.getRawLocalState(this.resolveAddress(address)),
+        "local",
+      );
+    },
+
     key: async <T = unknown>(
       key: string,
       address?: string | algosdk.Address | AddressWithTransactionSigner,
