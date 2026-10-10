@@ -1,3 +1,9 @@
+# 0.2.0 - October 10th, 2026
+
+## Breaking Changes
+
+- Require `algosdk` `^3.8.0`.
+
 # 0.1.0 - October 9th, 2026
 
 ## Features

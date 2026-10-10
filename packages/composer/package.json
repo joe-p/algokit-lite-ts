@@ -1,6 +1,6 @@
 {
   "name": "@joe-p/algokit-lite-composer",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Transaction composer and ARC-56 utilities for algoKIT lite",
   "repository": {
     "type": "git",
