@@ -26,13 +26,13 @@
     "prepack": "pnpm run build"
   },
   "peerDependencies": {
-    "algosdk": "^3.7.0"
+    "algosdk": "^3.8.0"
   },
   "dependencies": {
     "@joe-p/algokit-lite-app-client": "workspace:^",
     "@joe-p/algokit-lite-composer": "workspace:^",
     "@joe-p/algokit-lite-generator": "workspace:^",
     "@joe-p/algokit-lite-localnet": "workspace:^",
-    "algosdk": "^3.7.0"
+    "algosdk": "^3.8.0"
   }
 }

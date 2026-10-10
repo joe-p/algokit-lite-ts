@@ -15,7 +15,7 @@ importers:
         specifier: ^24.19.1
         version: 24.19.1
       algosdk:
-        specifier: ^3.7.0
+        specifier: ^3.8.0
         version: 3.8.0
       eslint:
         specifier: ^10.10.0
@@ -57,7 +57,7 @@ importers:
         specifier: workspace:^
         version: link:../localnet
       algosdk:
-        specifier: ^3.7.0
+        specifier: ^3.8.0
         version: 3.8.0
 
   packages/app-client:
@@ -66,13 +66,13 @@ importers:
         specifier: workspace:^
         version: link:../composer
       algosdk:
-        specifier: ^3.7.0
+        specifier: ^3.8.0
         version: 3.8.0
 
   packages/composer:
     dependencies:
       algosdk:
-        specifier: ^3.7.0
+        specifier: ^3.8.0
         version: 3.8.0
 
   packages/generator:
@@ -81,7 +81,7 @@ importers:
         specifier: workspace:^
         version: link:../composer
       algosdk:
-        specifier: ^3.7.0
+        specifier: ^3.8.0
         version: 3.8.0
       prettier:
         specifier: ^3.9.6
@@ -93,7 +93,7 @@ importers:
         specifier: workspace:^
         version: link:../composer
       algosdk:
-        specifier: ^3.7.0
+        specifier: ^3.8.0
         version: 3.8.0
       tweetnacl:
         specifier: ^1.0.3

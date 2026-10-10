@@ -353,6 +353,18 @@ describe("ARC56Generator", () => {
     });
     expect(boxMapVal).toEqual({ sum: 3n, difference: 1n });
 
+    expect(await appClient.state.box()).toEqual({
+      keys: { boxKey: "baz" },
+      maps: {
+        boxMap: [
+          {
+            key: { add: { a: 1n, b: 2n }, subtract: { a: 4n, b: 3n } },
+            value: { sum: 3n, difference: 1n },
+          },
+        ],
+      },
+    });
+
     // 6. Composer integration via params()
     const compResult = await localnet
       .composer()

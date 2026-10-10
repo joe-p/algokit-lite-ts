@@ -84,6 +84,16 @@ export type ARC56TestLocalState = {
   };
 };
 
+/** All the decoded box state. Keys that are not set are omitted. */
+export type ARC56TestBoxState = {
+  keys: {
+    boxKey?: string;
+  };
+  maps: {
+    boxMap: Array<{ key: Inputs; value: Outputs }>;
+  };
+};
+
 export class ARC56TestClient extends ARC56AppClient {
   constructor(p: {
     appId: bigint | number;
@@ -201,6 +211,10 @@ export class ARC56TestClient extends ARC56AppClient {
       address: string | algosdk.Address | algosdk.AddressWithTransactionSigner,
     ): Promise<ARC56TestLocalState> => {
       return (await this.getState.local(address)) as ARC56TestLocalState;
+    },
+    /** Get all the box state */
+    box: async (): Promise<ARC56TestBoxState> => {
+      return (await this.getState.box()) as ARC56TestBoxState;
     },
     keys: {
       globalKey: async (): Promise<uint64> => {

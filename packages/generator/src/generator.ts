@@ -517,7 +517,7 @@ export class ARC56Generator {
   }
 
   /** Whether the contract declares any keys or maps in the given storage */
-  private hasStorage(storage: "global" | "local"): boolean {
+  private hasStorage(storage: "global" | "local" | "box"): boolean {
     return (
       Object.keys(this.arc56.state?.keys?.[storage] ?? {}).length > 0 ||
       Object.keys(this.arc56.state?.maps?.[storage] ?? {}).length > 0
@@ -525,14 +525,14 @@ export class ARC56Generator {
   }
 
   /** The name of the type of all the decoded global or local state */
-  private stateTypeName(storage: "global" | "local"): string {
-    return `${this.arc56.name}${storage === "global" ? "Global" : "Local"}State`;
+  private stateTypeName(storage: "global" | "local" | "box"): string {
+    return `${this.arc56.name}${storage.charAt(0).toUpperCase()}${storage.slice(1)}State`;
   }
 
   getStateTypeLines(): string[] {
     const lines: string[] = [];
 
-    (["global", "local"] as const).forEach((storage) => {
+    (["global", "local", "box"] as const).forEach((storage) => {
       if (!this.hasStorage(storage)) return;
       if (lines.length > 0) lines.push("");
 
@@ -592,6 +592,14 @@ export class ARC56Generator {
       lines.push(
         "/** Get all of an account's local state */",
         `local: async (address: string | algosdk.Address | algosdk.AddressWithTransactionSigner): Promise<${stateType}> => { return (await this.getState.local(address)) as ${stateType}; },`,
+      );
+    }
+
+    if (this.hasStorage("box")) {
+      const stateType = this.stateTypeName("box");
+      lines.push(
+        "/** Get all the box state */",
+        `box: async (): Promise<${stateType}> => { return (await this.getState.box()) as ${stateType}; },`,
       );
     }
 
