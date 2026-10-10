@@ -1,3 +1,9 @@
+# 0.2.0 - October 10th, 2026
+
+## Features
+
+- Generate typed `state.global()` and `state.local(address)` accessors that get all of an app's global or local state.
+
 # 0.1.0 - October 9th, 2026
 
 ## Features
