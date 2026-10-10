@@ -1,6 +1,6 @@
 {
   "name": "@joe-p/algokit-lite-app-client",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "ARC-56 app client for algoKIT lite",
   "repository": {
     "type": "git",
