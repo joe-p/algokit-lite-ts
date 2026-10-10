@@ -1,3 +1,13 @@
+# 0.3.0 - October 10th, 2026
+
+## Breaking Changes
+
+- Require `algosdk` `^3.8.0`.
+
+## Features
+
+- Generate a typed `state.box()` accessor that gets all of an app's box state.
+
 # 0.2.0 - October 10th, 2026
 
 ## Features
