@@ -5,6 +5,138 @@ import { ARC56AppClient } from "../src/arc56_client";
 import type { ARC56Contract } from "@joe-p/algokit-lite-composer";
 import arc56Json from "../../../fixtures/ARC56Test.arc56.json";
 
+describe.each(["global", "local"] as const)(
+  "ARC56AppClient bulk %s state",
+  (storage) => {
+    function reader(
+      state: ARC56Contract["state"],
+      entries: algosdk.modelsv2.TealKeyValue[],
+    ) {
+      const client = new ARC56AppClient({
+        arc56: { ...(arc56Json as unknown as ARC56Contract), state },
+        appId: 1n,
+        algod: {
+          getApplicationByID: () => ({
+            do: () => Promise.resolve({ params: { globalState: entries } }),
+          }),
+          accountApplicationInformation: () => ({
+            do: () => Promise.resolve({ appLocalState: { keyValue: entries } }),
+          }),
+        } as unknown as algosdk.Algodv2,
+      });
+      return () =>
+        storage === "global"
+          ? client.getState.global()
+          : client.getState.local(algosdk.generateAccount().addr);
+    }
+
+    it("should reject invalid map values instead of assigning them to a fallback map", async () => {
+      const read = reader(
+        {
+          maps: {
+            [storage]: {
+              strict: {
+                prefix: "cA==",
+                keyType: "AVMString",
+                valueType: "uint64",
+              },
+              fallback: { keyType: "AVMString", valueType: "AVMBytes" },
+            },
+          },
+        },
+        [
+          new algosdk.modelsv2.TealKeyValue({
+            key: new TextEncoder().encode("pfoo"),
+            value: new algosdk.modelsv2.TealValue({
+              type: 1,
+              uint: 0n,
+              bytes: new Uint8Array([1]),
+            }),
+          }),
+        ],
+      );
+
+      await expect(read()).rejects.toThrow("uint64");
+    });
+
+    it("should still try another map when the map key cannot be decoded", async () => {
+      const read = reader(
+        {
+          maps: {
+            [storage]: {
+              strict: {
+                prefix: "cA==",
+                keyType: "uint64",
+                valueType: "uint64",
+              },
+              fallback: { keyType: "AVMString", valueType: "AVMUint64" },
+            },
+          },
+        },
+        [
+          new algosdk.modelsv2.TealKeyValue({
+            key: new TextEncoder().encode("pfoo"),
+            value: new algosdk.modelsv2.TealValue({
+              type: 2,
+              uint: 7n,
+              bytes: new Uint8Array(),
+            }),
+          }),
+        ],
+      );
+
+      expect(await read()).toEqual({
+        keys: {},
+        maps: { strict: [], fallback: [{ key: "pfoo", value: 7n }] },
+      });
+    });
+
+    it("should preserve keys and maps named __proto__ as own properties", async () => {
+      const read = reader(
+        {
+          keys: {
+            [storage]: {
+              ["__proto__"]: {
+                key: "aw==",
+                keyType: "AVMString",
+                valueType: "AVMUint64",
+              },
+            },
+          },
+          maps: {
+            [storage]: {
+              ["__proto__"]: {
+                prefix: "cA==",
+                keyType: "AVMString",
+                valueType: "AVMUint64",
+              },
+            },
+          },
+        },
+        ["k", "pfoo"].map(
+          (key) =>
+            new algosdk.modelsv2.TealKeyValue({
+              key: new TextEncoder().encode(key),
+              value: new algosdk.modelsv2.TealValue({
+                type: 2,
+                uint: 7n,
+                bytes: new Uint8Array(),
+              }),
+            }),
+        ),
+      );
+
+      const state = await read();
+      expect(Object.hasOwn(state.keys, "__proto__")).toBe(true);
+      expect(state.keys["__proto__"]).toBe(7n);
+      expect(Object.hasOwn(state.maps, "__proto__")).toBe(true);
+      expect(state.maps["__proto__"]).toEqual([{ key: "foo", value: 7n }]);
+      expect(Object.getPrototypeOf(state.keys)).toBeNull();
+      expect(Object.getPrototypeOf(state.maps)).toBeNull();
+    });
+  },
+);
+
 describe("ARC56AppClient", () => {
   const localnet = new Localnet();
   const arc56 = arc56Json as unknown as ARC56Contract;
@@ -269,6 +401,12 @@ return`;
 
     const globalMapFoo = await appClient.getState.map.value("globalMap", "foo");
     expect(globalMapFoo).toEqual({ foo: 13n, bar: 37n });
+
+    const globalState = await appClient.getState.global();
+    expect(globalState).toEqual({
+      keys: { globalKey: 1337n },
+      maps: { globalMap: [{ key: "foo", value: { foo: 13n, bar: 37n } }] },
+    });
   });
 
   it("should support opt-in, boxes, and reading local state & box state", async () => {
@@ -318,6 +456,12 @@ return`;
       sender,
     );
     expect(localMapFoo).toBe("bar");
+
+    const localState = await appClient.getState.local(sender);
+    expect(localState).toEqual({
+      keys: { localKey: 1337n },
+      maps: { localMap: [{ key: "foo", value: "bar" }] },
+    });
 
     // Verify box state
     const boxKeyVal = await appClient.getState.key("boxKey");

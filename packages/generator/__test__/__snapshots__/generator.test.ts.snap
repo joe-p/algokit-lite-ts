@@ -64,6 +64,26 @@ export type TemplateVariables = {
   someNumber: uint64;
 };
 
+/** All the decoded global state. Keys that are not set are omitted. */
+export type ARC56TestGlobalState = {
+  keys: {
+    globalKey?: uint64;
+  };
+  maps: {
+    globalMap: Array<{ key: string; value: { foo: uint16; bar: uint16 } }>;
+  };
+};
+
+/** All the decoded local state. Keys that are not set are omitted. */
+export type ARC56TestLocalState = {
+  keys: {
+    localKey?: uint64;
+  };
+  maps: {
+    localMap: Array<{ key: bytes; value: string }>;
+  };
+};
+
 export class ARC56TestClient extends ARC56AppClient {
   constructor(p: {
     appId: bigint | number;
@@ -172,6 +192,16 @@ export class ARC56TestClient extends ARC56AppClient {
   };
 
   state = {
+    /** Get all the global state */
+    global: async (): Promise<ARC56TestGlobalState> => {
+      return (await this.getState.global()) as ARC56TestGlobalState;
+    },
+    /** Get all of an account's local state */
+    local: async (
+      address: string | algosdk.Address | algosdk.AddressWithTransactionSigner,
+    ): Promise<ARC56TestLocalState> => {
+      return (await this.getState.local(address)) as ARC56TestLocalState;
+    },
     keys: {
       globalKey: async (): Promise<uint64> => {
         return this.getState.key("globalKey");
