@@ -137,6 +137,120 @@ describe.each(["global", "local"] as const)(
   },
 );
 
+describe("ARC56AppClient bulk box state", () => {
+  const encode = (s: string) => new TextEncoder().encode(s);
+
+  it("should page through boxes by prefix at a single round", async () => {
+    // Each page holds one box; algod encodes the last returned name as a b64: cursor.
+    const boxes = ["k", "kv", "pa", "pb", "x"].map(
+      (name) =>
+        new algosdk.modelsv2.BoxDescriptor({
+          name: encode(name),
+          value: encode(`${name}!`),
+        }),
+    );
+    const requests: Array<Record<string, unknown>> = [];
+
+    const client = new ARC56AppClient({
+      arc56: {
+        ...(arc56Json as unknown as ARC56Contract),
+        state: {
+          keys: {
+            box: {
+              short: {
+                key: "aw==",
+                keyType: "AVMString",
+                valueType: "AVMString",
+              },
+              long: {
+                key: "a3Y=",
+                keyType: "AVMString",
+                valueType: "AVMString",
+              },
+            },
+          },
+          maps: {
+            box: {
+              map: {
+                prefix: "cA==",
+                keyType: "AVMString",
+                valueType: "AVMString",
+              },
+            },
+          },
+        },
+      },
+      appId: 1n,
+      algod: {
+        getApplicationBoxes: () => {
+          const query: Record<string, unknown> = {};
+          const request = {
+            include: (v: string) => ((query.include = v), request),
+            next: (v: string) => ((query.next = v), request),
+            prefix: (v: Uint8Array) => (
+              (query.prefix = new TextDecoder().decode(v)),
+              request
+            ),
+            round: (v: number) => ((query.round = v), request),
+            do: () => {
+              requests.push(query);
+              const matching = boxes.filter((b) =>
+                new TextDecoder()
+                  .decode(b.name)
+                  .startsWith((query.prefix as string | undefined) ?? ""),
+              );
+              let start = 0;
+              if (query.next) {
+                const token = query.next as string;
+                expect(token).toMatch(/^b64:/);
+                const cursor = algosdk.base64ToBytes(token.slice(4));
+                const cursorIndex = matching.findIndex(
+                  (b) =>
+                    b.name.every((byte, i) => byte === cursor[i]) &&
+                    b.name.length === cursor.length,
+                );
+                expect(cursorIndex).toBeGreaterThanOrEqual(0);
+                start = cursorIndex + 1;
+              }
+              const page = matching.slice(start, start + 1);
+              const last = page.at(-1);
+              return Promise.resolve(
+                new algosdk.modelsv2.BoxesResponse({
+                  boxes: page,
+                  round: 42,
+                  nextToken:
+                    last && start + page.length < matching.length
+                      ? `b64:${algosdk.bytesToBase64(last.name)}`
+                      : undefined,
+                }),
+              );
+            },
+          };
+          return request;
+        },
+      } as unknown as algosdk.Algodv2,
+    });
+
+    expect(await client.getState.box()).toEqual({
+      keys: { short: "k!", long: "kv!" },
+      maps: {
+        map: [
+          { key: "a", value: "pa!" },
+          { key: "b", value: "pb!" },
+        ],
+      },
+    });
+
+    // "kv" is covered by the "k" query, and "x" matches no prefix
+    expect(requests).toEqual([
+      { include: "values", prefix: "k" },
+      { include: "values", prefix: "k", next: "b64:aw==", round: 42 },
+      { include: "values", prefix: "p", round: 42 },
+      { include: "values", prefix: "p", next: "b64:cGE=", round: 42 },
+    ]);
+  });
+});
+
 describe("ARC56AppClient", () => {
   const localnet = new Localnet();
   const arc56 = arc56Json as unknown as ARC56Contract;
@@ -472,6 +586,19 @@ return`;
       subtract: { a: 4n, b: 3n },
     });
     expect(boxMapVal).toEqual({ sum: 3n, difference: 1n });
+
+    const boxState = await appClient.getState.box();
+    expect(boxState).toEqual({
+      keys: { boxKey: "baz" },
+      maps: {
+        boxMap: [
+          {
+            key: { add: { a: 1n, b: 2n }, subtract: { a: 4n, b: 3n } },
+            value: { sum: 3n, difference: 1n },
+          },
+        ],
+      },
+    });
   });
 
   it("should validate method names, sender requirements, and template variables", async () => {

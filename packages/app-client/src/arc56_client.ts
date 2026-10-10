@@ -43,6 +43,10 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   return a.length === b.length && a.every((byte, i) => byte === b[i]);
 }
 
+function startsWith(bytes: Uint8Array, prefix: Uint8Array): boolean {
+  return bytesEqual(bytes.subarray(0, prefix.length), prefix);
+}
+
 /** ARC56 action names, indexed by their OnApplicationComplete value */
 const ON_COMPLETE_STRINGS: Array<
   | "NoOp"
@@ -145,7 +149,7 @@ export type BareCreateResult = {
 export type MethodReturnValue<T = unknown> = T;
 
 /**
- * All the global or local state of an app, decoded with the ARC56 contract.
+ * All the global, local or box state of an app, decoded with the ARC56 contract.
  * Keys that are not set on chain are omitted.
  */
 export type DecodedState = {
@@ -154,6 +158,9 @@ export type DecodedState = {
   /** The entries of each ARC56 state map, by map name */
   maps: Record<string, Array<{ key: unknown; value: unknown }>>;
 };
+
+/** The raw bytes of a global, local or box state key and its value */
+type RawStateEntry = { key: Uint8Array; value: Uint8Array };
 
 export interface ARC56AppClientParams {
   arc56: ARC56Contract;
@@ -333,6 +340,53 @@ export class ARC56AppClient {
       : algosdk.base64ToBytes(kv.key);
   }
 
+  /** The raw key/value pairs of global or local state */
+  private rawStateEntries(
+    state: algosdk.modelsv2.TealKeyValue[],
+  ): RawStateEntry[] {
+    return state.map((kv) => ({
+      key: this.stateKeyBytes(kv),
+      value: this.stateValueBytes(kv.value),
+    }));
+  }
+
+  /**
+   * The names and values of the app's boxes that start with any of the given
+   * prefixes, paging through the results with every page pinned to one round
+   */
+  private async getRawBoxes(prefixes: Uint8Array[]): Promise<RawStateEntry[]> {
+    // Drop any prefix covered by a shorter one, so no box is fetched twice
+    const queries = prefixes
+      .sort((a, b) => a.length - b.length)
+      .filter(
+        (prefix, i, sorted) =>
+          !sorted.slice(0, i).some((shorter) => startsWith(prefix, shorter)),
+      );
+
+    const boxes: RawStateEntry[] = [];
+    let round: number | undefined;
+    for (const prefix of queries) {
+      let next: string | undefined;
+      do {
+        const request = this.algod
+          .getApplicationBoxes(this.appId)
+          .include("values");
+        if (next !== undefined) request.next(next);
+        if (prefix.length > 0) request.prefix(prefix);
+        if (round !== undefined) request.round(round);
+
+        const result = await request.do();
+        round ??= result.round;
+        for (const box of result.boxes) {
+          boxes.push({ key: box.name, value: box.value ?? new Uint8Array() });
+        }
+        next = result.nextToken;
+      } while (next);
+    }
+
+    return boxes;
+  }
+
   private findStateValue(
     state: algosdk.modelsv2.TealKeyValue[],
     b64Key: string,
@@ -352,10 +406,10 @@ export class ARC56AppClient {
     return this.getTypeScriptValue(type, this.stateValueBytes(keyValue.value));
   }
 
-  /** Decode every ARC56 key and map entry in raw global or local state */
+  /** Decode every ARC56 key and map entry in raw global, local or box state */
   private decodeState(
-    state: algosdk.modelsv2.TealKeyValue[],
-    storage: "global" | "local",
+    state: RawStateEntry[],
+    storage: "global" | "local" | "box",
   ): DecodedState {
     const keyDefs = Object.entries(this.arc56.state?.keys?.[storage] ?? {}).map(
       ([name, k]) => ({ name, k, key: algosdk.base64ToBytes(k.key) }),
@@ -375,10 +429,7 @@ export class ARC56AppClient {
     };
     for (const { name } of mapDefs) decoded.maps[name] = [];
 
-    for (const kv of state) {
-      const keyBytes = this.stateKeyBytes(kv);
-      const valueBytes = this.stateValueBytes(kv.value);
-
+    for (const { key: keyBytes, value: valueBytes } of state) {
       const keyDef = keyDefs.find(({ key }) => bytesEqual(key, keyBytes));
       if (keyDef) {
         decoded.keys[keyDef.name] = this.getTypeScriptValue(
@@ -389,7 +440,7 @@ export class ARC56AppClient {
       }
 
       for (const { name, map, prefix } of mapDefs) {
-        if (!bytesEqual(keyBytes.subarray(0, prefix.length), prefix)) continue;
+        if (!startsWith(keyBytes, prefix)) continue;
         let key: unknown;
         try {
           key = this.getTypeScriptValue(
@@ -891,7 +942,10 @@ export class ARC56AppClient {
      * is always decoded as that key, even if it was written as a map entry.
      */
     global: async (): Promise<DecodedState> => {
-      return this.decodeState(await this.getRawGlobalState(), "global");
+      return this.decodeState(
+        this.rawStateEntries(await this.getRawGlobalState()),
+        "global",
+      );
     },
 
     /**
@@ -905,9 +959,29 @@ export class ARC56AppClient {
       address: string | algosdk.Address | AddressWithTransactionSigner,
     ): Promise<DecodedState> => {
       return this.decodeState(
-        await this.getRawLocalState(this.resolveAddress(address)),
+        this.rawStateEntries(
+          await this.getRawLocalState(this.resolveAddress(address)),
+        ),
         "local",
       );
+    },
+
+    /**
+     * Get all the app's box state, decoded with the ARC56 box keys and maps.
+     * Only boxes whose names match an ARC56 box key or map prefix are fetched.
+     * Keys that are not set are omitted. A box whose name exactly matches an
+     * ARC56 key is always decoded as that key, even if it was written as a map
+     * entry.
+     */
+    box: async (): Promise<DecodedState> => {
+      const prefixes = [
+        ...Object.values(this.arc56.state?.keys?.box ?? {}).map((k) => k.key),
+        ...Object.values(this.arc56.state?.maps?.box ?? {}).map(
+          (m) => m.prefix ?? "",
+        ),
+      ].map((b64) => algosdk.base64ToBytes(b64));
+
+      return this.decodeState(await this.getRawBoxes(prefixes), "box");
     },
 
     key: async <T = unknown>(
