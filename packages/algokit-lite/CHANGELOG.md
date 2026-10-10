@@ -1,3 +1,9 @@
+# 0.9.0 - October 10th, 2026
+
+## Features
+
+- Get all of an app's global or local state with `getState.global()` and `getState.local(address)` on app clients, and typed `state.global()` and `state.local(address)` on generated clients.
+
 # 0.8.0 - October 9th, 2026
 
 ## Breaking Changes
