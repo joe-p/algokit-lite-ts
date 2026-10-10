@@ -233,10 +233,51 @@ export interface ComposerExecuteResult<TReturns extends unknown[] = unknown[]> {
   methodResults: MethodResults<TReturns>;
 }
 
+export type ErrorTransformer = (error: Error) => Promise<Error>;
+
+class InvalidErrorTransformerValue extends Error {
+  constructor(originalError: Error, value: unknown) {
+    super(
+      `An error transformer returned a non-error value: ${String(value)}. The original error before any transformation: ${originalError.message}`,
+      { cause: originalError },
+    );
+  }
+}
+
+class ErrorTransformerError extends Error {
+  constructor(originalError: Error, cause: unknown) {
+    super(
+      `An error transformer threw an error: ${String(cause)}. The original error before any transformation: ${originalError.message}`,
+      { cause },
+    );
+  }
+}
+
 export class Composer<TReturns extends unknown[] = []> {
+  private static globalErrorTransformers: Set<ErrorTransformer> = new Set();
+
+  /**
+   * Error transformers used by every composer that is not given its own. They
+   * are called in the order they were registered, each with the error
+   * returned by the previous one.
+   */
+  static get errorTransformers(): ReadonlySet<ErrorTransformer> {
+    return Composer.globalErrorTransformers;
+  }
+
+  static registerErrorTransformer(transformer: ErrorTransformer) {
+    Composer.globalErrorTransformers.add(transformer);
+  }
+
+  /** Stop a transformer from being used by composers without their own */
+  static unregisterErrorTransformer(transformer: ErrorTransformer) {
+    Composer.globalErrorTransformers.delete(transformer);
+  }
+
   private atc: AtomicTransactionComposer = new AtomicTransactionComposer();
   private pendingParams: TransactionParams[] = [];
   private txnInfo: TxnInfo[] = [];
+  private errorTransformers: ReadonlySet<ErrorTransformer>;
 
   /**
    * Called once per transaction that does not carry its own suggestedParams.
@@ -254,9 +295,47 @@ export class Composer<TReturns extends unknown[] = []> {
   constructor(opts: {
     getSuggestedParams?: () => Promise<SuggestedParams>;
     populateAppCallResources?: boolean;
+    /** Replaces the transformers registered with registerErrorTransformer */
+    errorTransformers?: ReadonlySet<ErrorTransformer>;
   }) {
     this.getSuggestedParams = opts.getSuggestedParams;
     this.populateAppCallResources = opts.populateAppCallResources ?? true;
+    this.errorTransformers =
+      opts.errorTransformers ?? Composer.errorTransformers;
+  }
+
+  private async transformError(originalError: unknown): Promise<unknown> {
+    // Transformers only work with Error instances, so immediately return anything else
+    if (!(originalError instanceof Error)) {
+      return originalError;
+    }
+
+    let transformedError = originalError;
+
+    for (const transformer of this.errorTransformers) {
+      try {
+        transformedError = await transformer(transformedError);
+        if (!(transformedError instanceof Error)) {
+          return new InvalidErrorTransformerValue(
+            originalError,
+            transformedError,
+          );
+        }
+      } catch (errorFromTransformer) {
+        return new ErrorTransformerError(originalError, errorFromTransformer);
+      }
+    }
+
+    return transformedError;
+  }
+
+  /** Run fn, transforming any error it throws */
+  private async transformErrors<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
+    } catch (e) {
+      throw await this.transformError(e);
+    }
   }
 
   private async getSdkParams(
@@ -892,10 +971,14 @@ export class Composer<TReturns extends unknown[] = []> {
     });
   }
 
-  async buildGroup(algod: Algodv2) {
+  private async buildGroupOrThrow(algod: Algodv2) {
     const { group, failedSimulation } = await this._buildGroup(algod);
     if (failedSimulation) Composer.throwSimulationFailure(failedSimulation);
     return group;
+  }
+
+  async buildGroup(algod: Algodv2) {
+    return this.transformErrors(() => this.buildGroupOrThrow(algod));
   }
 
   async buildGroupOffline() {
@@ -952,7 +1035,14 @@ export class Composer<TReturns extends unknown[] = []> {
     algod: Algodv2,
     roundsToWait: number = 3,
   ): Promise<ComposerExecuteResult<TReturns>> {
-    await this.buildGroup(algod);
+    return this.transformErrors(() => this._execute(algod, roundsToWait));
+  }
+
+  private async _execute(
+    algod: Algodv2,
+    roundsToWait: number,
+  ): Promise<ComposerExecuteResult<TReturns>> {
+    await this.buildGroupOrThrow(algod);
     // TODO: wait until latest last valid by default
     const result = await this.atc.execute(algod, roundsToWait);
 
@@ -966,6 +1056,16 @@ export class Composer<TReturns extends unknown[] = []> {
   }
 
   async simulate(
+    algod: Algodv2,
+    simRequest?: ComposerSimulateOptions,
+  ): Promise<{
+    methodResults: MethodResults<TReturns>;
+    simulateResponse: algosdk.modelsv2.SimulateResponse;
+  }> {
+    return this.transformErrors(() => this._simulate(algod, simRequest));
+  }
+
+  private async _simulate(
     algod: Algodv2,
     simRequest?: ComposerSimulateOptions,
   ): Promise<{

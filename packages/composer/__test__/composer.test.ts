@@ -2,7 +2,11 @@ import { describe, it, expect, beforeAll } from "vitest";
 import algosdk, { type Falcon1024SigningKey } from "algosdk";
 import { Localnet } from "@joe-p/algokit-lite-localnet";
 import { ARC56AppClient } from "@joe-p/algokit-lite-app-client";
-import { Composer, type MethodResult } from "../src/composer";
+import {
+  Composer,
+  type ErrorTransformer,
+  type MethodResult,
+} from "../src/composer";
 import type { ARC56Contract } from "../src/types/arc56";
 import arc56Json from "../../../fixtures/ARC56Test.arc56.json";
 
@@ -367,11 +371,17 @@ describe("Composer ARC56", () => {
       });
 
     for (const composer of [failingCall, underpaying]) {
-      const error = await composer()
+      let error = await composer()
         .simulate(localnet.algod)
         .catch((e: unknown) => e);
       expect(error).toBeInstanceOf(Error);
       if (!(error instanceof Error)) throw new Error("Expected an error");
+      if (composer === failingCall) {
+        // Mapped by the error transformer the app client registered
+        expect(error.message).toMatch(/^Runtime error when executing/);
+        error = error.cause;
+        if (!(error instanceof Error)) throw new Error("Expected an error");
+      }
       expect(error.cause).toBeInstanceOf(algosdk.modelsv2.SimulateResponse);
       const response = error.cause as algosdk.modelsv2.SimulateResponse;
       expect(error.message).toBe(response.txnGroups[0]?.failureMessage ?? "");
@@ -383,6 +393,82 @@ describe("Composer ARC56", () => {
         error.message,
       );
     }
+  });
+
+  it("should apply error transformers in order, and wrap a failing transformer", async () => {
+    const underpaying = (
+      errorTransformers: ConstructorParameters<
+        typeof Composer
+      >[0]["errorTransformers"],
+    ) =>
+      new Composer({
+        getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
+        errorTransformers,
+      }).addPayment({
+        sender,
+        receiver: sender.address,
+        amount: 0n,
+        staticFee: 0n,
+      });
+
+    // eslint-disable-next-line @typescript-eslint/require-await
+    const first = async (e: Error) => Error(`first: ${e.message}`);
+    // eslint-disable-next-line @typescript-eslint/require-await
+    const second = async (e: Error) => Error(`second: ${e.message}`);
+    const chained = await underpaying(new Set([first, second]))
+      .execute(localnet.algod)
+      .catch((e: unknown) => e);
+    expect(chained).toBeInstanceOf(Error);
+    expect((chained as Error).message).toMatch(/^second: first: /);
+
+    // eslint-disable-next-line @typescript-eslint/require-await
+    const throwing = async () => {
+      throw Error("transformer failed");
+    };
+    const wrapped = await underpaying(new Set([throwing, second]))
+      .simulate(localnet.algod)
+      .catch((e: unknown) => e);
+    expect((wrapped as Error).message).toMatch(
+      /^An error transformer threw an error: Error: transformer failed/,
+    );
+
+    const returnsString = (() =>
+      Promise.resolve("oops")) as unknown as ErrorTransformer;
+    const invalid = await underpaying(new Set([returnsString]))
+      .execute(localnet.algod)
+      .catch((e: unknown) => e);
+    expect((invalid as Error).message).toMatch(
+      /^An error transformer returned a non-error value: oops/,
+    );
+  });
+
+  it("should map ARC56 errors of any composer while an app client is registered", async () => {
+    const failingCall = () =>
+      localnet
+        .composer()
+        .addMethodCall({
+          arc56,
+          appID: appId,
+          method: "foo",
+          sender,
+          methodArgs: [{ add: { a: 1n, b: 2n }, subtract: { a: 1n, b: 100n } }],
+        })
+        .execute(localnet.algod)
+        .catch((e: unknown) => e as Error);
+
+    const registered = Composer.errorTransformers.size;
+    const client = new ARC56AppClient({ arc56, algod: localnet.algod, appId });
+    expect(Composer.errorTransformers.size).toBe(registered + 1);
+    client.unregisterErrorTransformer();
+    expect(Composer.errorTransformers.size).toBe(registered);
+
+    // Still mapped by the client created in beforeAll
+    const error = await failingCall();
+    expect((error as Error).message).toMatch(
+      new RegExp(
+        `^Runtime error when executing ARC56Test \\(appId: ${appId}\\)`,
+      ),
+    );
   });
 
   it("should use the sender's signer when simulating without skipSignatures", async () => {

@@ -7,6 +7,7 @@ import {
   Composer,
   type AppCreateParams,
   type ComposerSender,
+  type ErrorTransformer,
   type ARC56MethodParams,
   type MethodParams,
   type MethodResult,
@@ -201,6 +202,64 @@ export class ARC56AppClient {
       networks: this.arc56.networks,
     });
     this.getSuggestedParams = p.getSuggestedParams;
+
+    // While creating, the app id is unknown, so errors from any app would be
+    // mapped with this contract. Only the client's own composers use it then.
+    if (this.appId !== 0n) {
+      Composer.registerErrorTransformer(this.errorTransformer);
+    }
+  }
+
+  /**
+   * Map logic errors from this app to their ARC56 error messages. Registered
+   * with every Composer once the app id is known.
+   */
+  private readonly errorTransformer: ErrorTransformer = async (e) => {
+    // Errors from algod carry the details (app id and pc) in their response
+    let details = "";
+    try {
+      details = JSON.stringify(e);
+    } catch {
+      // Not serializable, e.g. it holds a bigint
+    }
+    const str = `${e.message} ${details}`;
+    if (
+      this.appId !== 0n &&
+      !new RegExp(`(app=|application \\()${this.appId}\\b`).test(str)
+    ) {
+      return e;
+    }
+
+    return (
+      parseLogicError(
+        this.arc56,
+        this.appId,
+        str,
+        e,
+        await this.deployedApprovalProgram(),
+      ) ?? e
+    );
+  };
+
+  /**
+   * Stop mapping this app's errors in composers other than the client's own,
+   * so the client can be garbage collected once it is no longer used.
+   */
+  unregisterErrorTransformer() {
+    Composer.unregisterErrorTransformer(this.errorTransformer);
+  }
+
+  /** A composer that maps errors from this app, even while it is created */
+  private newComposer() {
+    return new Composer({
+      getSuggestedParams:
+        this.getSuggestedParams ??
+        (() => this.algod.getTransactionParams().do()),
+      errorTransformers: new Set([
+        this.errorTransformer,
+        ...Composer.errorTransformers,
+      ]),
+    });
   }
 
   /**
@@ -225,24 +284,6 @@ export class ARC56AppClient {
       return app.params?.approvalProgram;
     } catch {
       return undefined;
-    }
-  }
-
-  private async executeWithErrorParsing(composer: Composer<unknown[]>) {
-    try {
-      return await composer.execute(this.algod);
-    } catch (e: unknown) {
-      const eMsg = e instanceof Error ? e.message : "";
-      const str = eMsg ? `${eMsg} ${JSON.stringify(e)}` : JSON.stringify(e);
-      throw (
-        parseLogicError(
-          this.arc56,
-          this.appId,
-          str,
-          e,
-          await this.deployedApprovalProgram(),
-        ) ?? e
-      );
     }
   }
 
@@ -644,11 +685,7 @@ export class ARC56AppClient {
       params.onComplete ?? algosdk.OnApplicationComplete.NoOpOC;
     const callOrCreate = this.appId === 0n ? "create" : "call";
 
-    const composer = new Composer({
-      getSuggestedParams:
-        this.getSuggestedParams ??
-        (() => this.algod.getTransactionParams().do()),
-    });
+    const composer = this.newComposer();
 
     composer.addMethodCall({
       ...this.getParams(params),
@@ -701,26 +738,8 @@ export class ARC56AppClient {
 
     const { simulateResponse, methodResults } = await composer.simulate(
       this.algod,
-      {
-        skipSignatures: true,
-        allowUnnamedResources: true,
-        // Thrown below, with the ARC56 error message
-        throwOnFailure: false,
-      },
+      { skipSignatures: true, allowUnnamedResources: true },
     );
-
-    const failureMessage = simulateResponse.txnGroups[0]?.failureMessage;
-    if (failureMessage) {
-      throw (
-        parseLogicError(
-          this.arc56,
-          this.appId,
-          failureMessage,
-          simulateResponse,
-          await this.deployedApprovalProgram(),
-        ) ?? Error(failureMessage, { cause: simulateResponse })
-      );
-    }
 
     return {
       result: { simulateResponse, methodResults },
@@ -741,7 +760,7 @@ export class ARC56AppClient {
   ): Promise<MethodCallResult<TReturn>> {
     const { composer, arc56Method } = this.composeMethodCall(params);
 
-    const result = await this.executeWithErrorParsing(composer);
+    const result = await composer.execute(this.algod);
 
     return {
       result,
@@ -877,10 +896,7 @@ export class ARC56AppClient {
       ));
     tempClient.createApprovalProgram = approvalProgram;
 
-    const composer = new Composer({
-      getSuggestedParams:
-        getSuggestedParams ?? (() => algod.getTransactionParams().do()),
-    });
+    const composer = tempClient.newComposer();
     composer.addAppCreate({
       ...createParams,
       onComplete,
@@ -907,7 +923,7 @@ export class ARC56AppClient {
         0,
     });
 
-    const result = await tempClient.executeWithErrorParsing(composer);
+    const result = await composer.execute(algod);
 
     const createTxId = result.txIDs.at(-1);
     if (createTxId === undefined) {
