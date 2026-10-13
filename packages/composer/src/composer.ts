@@ -257,19 +257,24 @@ export class Composer<TReturns extends unknown[] = []> {
   private static globalErrorTransformers: Set<ErrorTransformer> = new Set();
 
   /**
-   * Error transformers used by every composer that is not given its own. They
-   * are called in the order they were registered, each with the error
-   * returned by the previous one.
+   * Global error transformers used unless disableGlobalErrorTransformers is
+   * true. Those registered when an error is thrown are called in registration
+   * order after the composer's own transformers, excluding duplicates. Each
+   * receives the error returned by the previous transformer.
    */
   static get errorTransformers(): ReadonlySet<ErrorTransformer> {
     return Composer.globalErrorTransformers;
   }
 
+  /** Register a global transformer for composers that enable global transformers. */
   static registerErrorTransformer(transformer: ErrorTransformer) {
     Composer.globalErrorTransformers.add(transformer);
   }
 
-  /** Stop a transformer from being used by composers without their own */
+  /**
+   * Stop using a transformer globally. Composers that explicitly include it
+   * in their errorTransformers still use it.
+   */
   static unregisterErrorTransformer(transformer: ErrorTransformer) {
     Composer.globalErrorTransformers.delete(transformer);
   }
@@ -278,6 +283,7 @@ export class Composer<TReturns extends unknown[] = []> {
   private pendingParams: TransactionParams[] = [];
   private txnInfo: TxnInfo[] = [];
   private errorTransformers: ReadonlySet<ErrorTransformer>;
+  private disableGlobalErrorTransformers: boolean;
 
   /**
    * Called once per transaction that does not carry its own suggestedParams.
@@ -295,13 +301,22 @@ export class Composer<TReturns extends unknown[] = []> {
   constructor(opts: {
     getSuggestedParams?: () => Promise<SuggestedParams>;
     populateAppCallResources?: boolean;
-    /** Replaces the transformers registered with registerErrorTransformer */
+    /**
+     * Transformers called before the global ones registered with
+     * registerErrorTransformer. One that is also registered is only called once.
+     */
     errorTransformers?: ReadonlySet<ErrorTransformer>;
+    /**
+     * Only call the given errorTransformers, not the global ones registered by
+     * the time an error is thrown. Defaults to false.
+     */
+    disableGlobalErrorTransformers?: boolean;
   }) {
     this.getSuggestedParams = opts.getSuggestedParams;
     this.populateAppCallResources = opts.populateAppCallResources ?? true;
-    this.errorTransformers =
-      opts.errorTransformers ?? Composer.errorTransformers;
+    this.errorTransformers = opts.errorTransformers ?? new Set();
+    this.disableGlobalErrorTransformers =
+      opts.disableGlobalErrorTransformers ?? false;
   }
 
   private async transformError(originalError: unknown): Promise<unknown> {
@@ -312,7 +327,13 @@ export class Composer<TReturns extends unknown[] = []> {
 
     let transformedError = originalError;
 
-    for (const transformer of this.errorTransformers) {
+    const transformers = new Set([
+      ...this.errorTransformers,
+      ...(this.disableGlobalErrorTransformers
+        ? []
+        : Composer.errorTransformers),
+    ]);
+    for (const transformer of transformers) {
       try {
         transformedError = await transformer(transformedError);
         if (!(transformedError instanceof Error)) {

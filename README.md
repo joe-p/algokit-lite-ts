@@ -261,18 +261,31 @@ const resultOfMethodTwo = result.returns[1];
 
 #### Lite
 
-With Lite, you can use the app client's `params` object to get the parameters to pass to a `Composer`. When calls are chained, the composer tracks each generated method's return type.
+The generated client's `newComposer()` returns a composer with a typed method for each of the app's methods that can be called once it exists. It is a `Composer`, so other transactions can be added to the same group, and the composer tracks each method's return type.
 
 ```ts
-const composer = await new Composer(...)
+const result = await client
+  .newComposer()
+  .methodOne({ sender, args: { arg1: 123 } })
+  .addPayment({ sender, receiver, amount })
+  .methodTwo({ sender, args: { arg1: "foo" } })
+  .execute(algod);
+
+// Inferred as the return type of methodOne
+const resultOfMethodOne = result.methodResults[0].returnValue;
+// Inferred as the return type of methodTwo
+const resultOfMethodTwo = result.methodResults[1].returnValue;
+```
+
+The composer's methods use the same keys as `params`, except that a method named after a `Composer` member (e.g. `execute`) uses its full signature: `composer["execute()void"]({ sender })`. Methods that don't support a NoOp call default to their first supported OnComplete, e.g. an opt-in only method is added as an opt-in.
+
+You can also use the app client's `params` object to get the parameters to pass to any `Composer`:
+
+```ts
+const result = await new Composer(...)
   .addMethodCall(client.params.methodOne({ args: { arg1: 123 } }))
   .addMethodCall(client.params.methodTwo({ args: { arg1: 'foo' } }))
   .execute(algod)
-
-// Inferred as the return type of methodOne
-const resultOfMethodOne = result.methodResults[0].returnValue
-// Inferred as the return type of methodTwo
-const resultOfMethodTwo = result.methodResults[1].returnValue
 ```
 
 If for some reason you cannot chain the `addMethodCalls` calls with the execute, you can use the exported `${arc56.name}ReturnTypes` from the generated client

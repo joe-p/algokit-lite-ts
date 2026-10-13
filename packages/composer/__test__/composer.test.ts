@@ -404,6 +404,7 @@ describe("Composer ARC56", () => {
       new Composer({
         getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
         errorTransformers,
+        disableGlobalErrorTransformers: true,
       }).addPayment({
         sender,
         receiver: sender.address,
@@ -440,6 +441,51 @@ describe("Composer ARC56", () => {
     expect((invalid as Error).message).toMatch(
       /^An error transformer returned a non-error value: oops/,
     );
+  });
+
+  it("should call the given error transformers first, then the global ones registered by the time of the error", async () => {
+    // eslint-disable-next-line @typescript-eslint/require-await
+    const given = async (e: Error) => Error(`given: ${e.message}`);
+    // eslint-disable-next-line @typescript-eslint/require-await
+    const global = async (e: Error) => Error(`global: ${e.message}`);
+    // eslint-disable-next-line @typescript-eslint/require-await
+    const both = async (e: Error) => Error(`both: ${e.message}`);
+    const underpaying = (disableGlobalErrorTransformers?: boolean) =>
+      new Composer({
+        getSuggestedParams: () => localnet.algod.getTransactionParams().do(),
+        errorTransformers: new Set([given, both]),
+        disableGlobalErrorTransformers,
+      }).addPayment({
+        sender,
+        receiver: sender.address,
+        amount: 0n,
+        staticFee: 0n,
+      });
+    const errorMessage = async (composer: Composer) => {
+      const error = await composer
+        .execute(localnet.algod)
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(Error);
+      return (error as Error).message;
+    };
+
+    const enabled = underpaying();
+    const disabled = underpaying(true);
+    // Registered after the composers were created
+    Composer.registerErrorTransformer(global);
+    Composer.registerErrorTransformer(both);
+    try {
+      // A transformer that is given and global is only called once
+      expect(await errorMessage(enabled)).toMatch(
+        /^global: both: given: (?!both|global)/,
+      );
+      expect(await errorMessage(disabled)).toMatch(
+        /^both: given: (?!both|global)/,
+      );
+    } finally {
+      Composer.unregisterErrorTransformer(global);
+      Composer.unregisterErrorTransformer(both);
+    }
   });
 
   it("should map ARC56 errors of any composer with one transformer per app id", async () => {
