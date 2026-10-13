@@ -1,5 +1,6 @@
 import algosdk from "algosdk";
 import {
+  Composer,
   getAbiMethodFromDefinition,
   type ARC56Contract,
   type StructFields,
@@ -19,6 +20,22 @@ export interface ARC56GeneratorOptions {
    */
   composerImportPath?: string;
 }
+
+/**
+ * Reserved generated composer member names, including instance properties and
+ * inherited prototype members. Colliding ABI methods use their full signature.
+ */
+const COMPOSER_MEMBERS: ReadonlySet<string> = (() => {
+  const members = new Set([...Object.keys(new Composer({})), "client"]);
+  let prototype: object | null = Composer.prototype;
+  while (prototype !== null) {
+    for (const name of Object.getOwnPropertyNames(prototype)) {
+      members.add(name);
+    }
+    prototype = Object.getPrototypeOf(prototype) as object | null;
+  }
+  return members;
+})();
 
 export class ARC56Generator {
   arc56: ARC56Contract;
@@ -324,6 +341,76 @@ export class ARC56Generator {
 
     lines.push("};");
     return lines;
+  }
+
+  /** The name of the generated composer class */
+  private composerName(): string {
+    return `${this.arc56.name}Composer`;
+  }
+
+  getComposerLines(): string[] {
+    const composer = this.composerName();
+    const lines = [
+      `/** A composer with typed methods for adding calls of the ${this.arc56.name} app's methods */`,
+      `export class ${composer}<TReturns extends unknown[] = []> extends Composer<TReturns> {`,
+      `readonly client: ${this.arc56.name}Client;`,
+      "",
+      `constructor(client: ${this.arc56.name}Client, opts: ConstructorParameters<typeof Composer>[0]) {`,
+      "  super(opts);",
+      "  this.client = client;",
+      "}",
+      "",
+      `override addMethodCall<TReturn>(params: MethodParams<TReturn>): ${composer}<[...TReturns, TReturn]> {`,
+      `  return super.addMethodCall(params) as unknown as ${composer}<[...TReturns, TReturn]>;`,
+      "}",
+    ];
+
+    // Create-only methods can't be called once the app exists
+    const methods = this.arc56.methods.filter((m) => m.actions.call.length > 0);
+
+    methods.forEach((m) => {
+      const { name, property: paramsProperty } = this.getMethodKey(m);
+      const paramsAccess =
+        paramsProperty === name ? `.${name}` : `[${paramsProperty}]`;
+      // Methods named after a composer member use their full signature
+      const property = COMPOSER_MEMBERS.has(paramsProperty)
+        ? JSON.stringify(
+            getAbiMethodFromDefinition(this.arc56, m).getSignature(),
+          )
+        : paramsProperty;
+      const retType = `${this.arc56.name}ReturnTypes[${JSON.stringify(name)}]`;
+      const paramsType =
+        m.args.length === 0
+          ? "TypedMethodParams = {}"
+          : `TypedMethodParams<{ ${m.args.map((a, i) => `${a.name ?? `arg${i}`}: ${this.getTypeScriptType(a.struct ?? a.type)}`).join("; ")} }>`;
+
+      // Methods that don't support NoOp default to their first call action
+      const defaultOnComplete = m.actions.call.includes("NoOp")
+        ? ""
+        : `onComplete: algosdk.OnApplicationComplete.${m.actions.call[0]}OC, `;
+      const paramsArg = defaultOnComplete
+        ? `{ ${defaultOnComplete}...methodParams }`
+        : "methodParams";
+
+      lines.push(
+        "",
+        `${property}(methodParams: ${paramsType}): ${composer}<[...TReturns, ${retType}]> {`,
+        `  return this.addMethodCall(this.client.params${paramsAccess}(${paramsArg}));`,
+        "}",
+      );
+    });
+
+    lines.push("}");
+    return lines;
+  }
+
+  getNewComposerLines(): string[] {
+    return [
+      "/** A new composer with typed methods for adding calls of the app's methods */",
+      `override newComposer(): ${this.composerName()} {`,
+      `  return new ${this.composerName()}(this, this.composerOptions());`,
+      "}",
+    ];
   }
 
   getReturnTypesLines(): string[] {
@@ -727,6 +814,7 @@ import {
   type MethodExecutionResult,${simulateImports}
 } from "${appClientImportPath}";
 import {
+  Composer,
   type MethodParams,
   type PaymentParams,
   type ARC56Contract,
@@ -770,7 +858,11 @@ export class ${this.arc56.name}Client extends ARC56AppClient {
   ${this.getStateLines().join("\n")}
 
   ${this.getDecodeReturnValueLines().join("\n")}
+
+  ${this.getNewComposerLines().join("\n")}
 }
+
+${this.getComposerLines().join("\n")}
 
 export default ${this.arc56.name}Client;
 `.trim();

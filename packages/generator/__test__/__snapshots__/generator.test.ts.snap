@@ -10,6 +10,7 @@ import {
   type MethodExecutionResult,
 } from "@joe-p/algokit-lite-app-client";
 import {
+  Composer,
   type MethodParams,
   type PaymentParams,
   type ARC56Contract,
@@ -258,6 +259,53 @@ export class ARC56TestClient extends ARC56AppClient {
       return this.decodeMethodReturnValue("foo", rawValue);
     },
   };
+
+  /** A new composer with typed methods for adding calls of the app's methods */
+  override newComposer(): ARC56TestComposer {
+    return new ARC56TestComposer(this, this.composerOptions());
+  }
+}
+
+/** A composer with typed methods for adding calls of the ARC56Test app's methods */
+export class ARC56TestComposer<
+  TReturns extends unknown[] = [],
+> extends Composer<TReturns> {
+  readonly client: ARC56TestClient;
+
+  constructor(
+    client: ARC56TestClient,
+    opts: ConstructorParameters<typeof Composer>[0],
+  ) {
+    super(opts);
+    this.client = client;
+  }
+
+  override addMethodCall<TReturn>(
+    params: MethodParams<TReturn>,
+  ): ARC56TestComposer<[...TReturns, TReturn]> {
+    return super.addMethodCall(params) as unknown as ARC56TestComposer<
+      [...TReturns, TReturn]
+    >;
+  }
+
+  foo(
+    methodParams: TypedMethodParams<{ inputs: Inputs }>,
+  ): ARC56TestComposer<[...TReturns, ARC56TestReturnTypes["foo"]]> {
+    return this.addMethodCall(this.client.params.foo(methodParams));
+  }
+
+  optInToApplication(
+    methodParams: TypedMethodParams = {},
+  ): ARC56TestComposer<
+    [...TReturns, ARC56TestReturnTypes["optInToApplication"]]
+  > {
+    return this.addMethodCall(
+      this.client.params.optInToApplication({
+        onComplete: algosdk.OnApplicationComplete.OptInOC,
+        ...methodParams,
+      }),
+    );
+  }
 }
 
 export default ARC56TestClient;

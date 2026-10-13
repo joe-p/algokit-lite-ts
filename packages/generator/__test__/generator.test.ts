@@ -382,7 +382,54 @@ describe("ARC56Generator", () => {
     const decoded = appClient.decodeReturnValue.foo(firstResult.rawReturnValue);
     expect(decoded).toEqual({ sum: 30n, difference: 35n });
 
-    // 8. Error handling
+    // 8. Typed composer
+    const typedResult = await appClient
+      .newComposer()
+      .foo({ sender: dispenser, args: { inputs } })
+      .addPayment({ sender: dispenser, receiver: appAddress, amount: 0n })
+      .foo({
+        sender: dispenser,
+        args: {
+          inputs: { add: { a: 1n, b: 2n }, subtract: { a: 5n, b: 3n } },
+        },
+      })
+      .execute(localnet.algod);
+    const typedReturn: ARC56TestReturnTypes["foo"] | undefined =
+      typedResult.methodResults[1].returnValue;
+    expect(typedResult.methodResults[0].returnValue).toEqual({
+      sum: 30n,
+      difference: 35n,
+    });
+    expect(typedReturn).toEqual({ sum: 3n, difference: 2n });
+
+    // The errors of an app whose client is created after the composer are
+    // mapped too
+    const crossAppComposer = appClient.newComposer();
+    const { appClient: otherClient } =
+      await ARC56TestClient.create.createApplication({
+        algod: localnet.algod,
+        sender: dispenser,
+        templateVariables: { someNumber: 1n },
+      });
+    await expect(
+      crossAppComposer
+        .foo({ sender: dispenser, args: { inputs } })
+        .addMethodCall(
+          otherClient.params.foo({
+            sender: dispenser,
+            args: {
+              inputs: { add: { a: 1n, b: 2n }, subtract: { a: 1n, b: 100n } },
+            },
+          }),
+        )
+        .execute(localnet.algod),
+    ).rejects.toThrow(
+      new RegExp(
+        `^Runtime error when executing ARC56Test \\(appId: ${otherClient.appId}\\)`,
+      ),
+    );
+
+    // 9. Error handling
     await expect(
       appClient.call.foo({
         sender: dispenser,

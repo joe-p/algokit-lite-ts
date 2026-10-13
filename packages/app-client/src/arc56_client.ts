@@ -303,9 +303,9 @@ export class ARC56AppClient {
   }
 
   /**
-   * Map logic errors from this app to their ARC56 error messages. Registered
-   * with every Composer once the app id is known, until another client for the
-   * same app is created.
+   * Map logic errors from this app to their ARC56 error messages. Always used
+   * by this client's composers. Once the app id is known, also registered
+   * globally until unregistered or replaced by another client for the same app.
    */
   private readonly errorTransformer: ErrorTransformer = async (e) => {
     // Errors from algod carry the details (app id and pc) in their response
@@ -347,17 +347,27 @@ export class ARC56AppClient {
     Composer.unregisterErrorTransformer(this.errorTransformer);
   }
 
-  /** A composer that maps errors from this app, even while it is created */
-  private newComposer() {
-    return new Composer({
+  /**
+   * Options for this client's composers. They use the client's suggested params
+   * and error transformer, even while the app is being created, followed by
+   * the global transformers registered when an error is thrown.
+   */
+  protected composerOptions(): ConstructorParameters<typeof Composer>[0] {
+    return {
       getSuggestedParams:
         this.getSuggestedParams ??
         (() => this.algod.getTransactionParams().do()),
-      errorTransformers: new Set([
-        this.errorTransformer,
-        ...Composer.errorTransformers,
-      ]),
-    });
+      errorTransformers: new Set([this.errorTransformer]),
+    };
+  }
+
+  /**
+   * A new composer that uses the client's suggested params and maps errors
+   * from this app. Generated clients return a composer with typed methods
+   * for adding calls of the app's methods.
+   */
+  newComposer(): Composer {
+    return new Composer(this.composerOptions());
   }
 
   /**
