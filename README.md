@@ -22,9 +22,18 @@ This library is a light wrapper around algosdk to make it easier to interact wit
 
 Generated clients import from `@joe-p/algosdk-app-client` and `@joe-p/algosdk-composer`, so projects using them need both packages.
 
-## Why Not Utils?
+## Long Term Plan
 
-algosdk-future is intentionally much simpler than AlgoKit utils. The abstractions are smaller and the amount of "magic" happening is lower. Some algosdk-future interfaces are more verbose/explicit than AlgoKit Utils, but that is intentional. This makes it easier for agents to understand the library and for humans to review the code.
+algosdk future represents features that will come to the SDK at a future date. Fast iteration and breakages are expected this early in development, hence algosdk=future is a completely seperate repo and package. Long term the plan is as follows
+
+1. Publish `algosdk-future` as a separate package from its own monorepo
+1. Include `algosdk-future` packages in the upstream [algorand/js-algorand-sdk](https://github.com/algorand/js-algorand-sdk) repository and re-export them under a unstable namespace: `algosdk.future`
+1. Stabilize `algosdk-future` packages and re-export them at the top level of `algosdk` and publish modular packages for today's `algosdk` functionality (`algosdk-transact`, `algosdk-algod-api`, etc.) that are also re-exported (non-breaking change)
+1. Deprecate `algosdk.AtomicTransactionComposer` in favor of `algosdk-future`'s `Composer`
+
+## Why Not AlgoKit?
+
+algosdk-future is intentionally much simpler than AlgoKit. The abstractions are smaller and the amount of "magic" happening is lower. Some algosdk-future interfaces are more verbose/explicit than AlgoKit Utils, but that is intentional. This makes it easier for agents to understand the library and for humans to review the code.
 
 Additionally, algosdk-future uses some new features of algod to do things in a different and breaking way. For example, transactions in algosdk-future have a `feePercent` field rather than an `extraFee` or `maxFee` field. This allows simulate to be used to determine transaction fees rather than relying on hardcoded values.
 
@@ -34,7 +43,7 @@ The general pattern of the composer for both AlgoKit Utils and algosdk-future is
 
 ### extraFee and maxFee
 
-#### Utils
+#### AlgoKit
 
 In AlgoKit utils you can use extraFee to hardcode extra fee to cover other transactions. A common use case is covering inner transactions on an app call.
 
@@ -104,7 +113,7 @@ composer
 
 ### Sender and Signer
 
-#### Utils
+#### AlgoKit
 
 In AlgoKit Utils, the sender must be a `string | Address`. If the address is known by the AlgorandClient, then the `TransactionSigner` is implicit
 
@@ -183,7 +192,7 @@ One of the main reasons projects use AlgoKit Utils is because of the typed clien
 
 In Utils, to create a new application you must use the app factory.
 
-##### Utils
+##### AlgoKit
 
 ```ts
 import {
@@ -242,7 +251,7 @@ Generated clients use full-signature keys for overloaded methods, for example `a
 
 ### Typed Composer
 
-#### Utils
+#### AlgoKit
 
 AlgoKit Utils' generated client includes a typed composer for composing a group with one or more typed method calls.
 
